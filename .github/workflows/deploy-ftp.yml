@@ -3,6 +3,11 @@ name: Publicar Barber Shop no FTP
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'tests/**'
+      - 'scripts/**'
+      - 'mobile/**'
   workflow_dispatch:
 
 permissions:
@@ -15,7 +20,6 @@ jobs:
     steps:
       - name: Baixar o código
         uses: actions/checkout@v4
-
       - name: Publicar na pasta barbershop
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
@@ -29,5 +33,19 @@ jobs:
             **/.git*/**
             **/.github/**
             **/.ftp-deploy-sync-state.json
-            **/README*.md
+            **/config.php
+            **/.installed
             **/config.example.php
+            **/.env*
+            **/README*.md
+            **/TODO.md
+            **/plan.md
+            **/*.sql
+            **/tests/**
+            **/scripts/**
+            **/mobile/**
+            **/node_modules/**
+            **/package*.json
+            **/pnpm*.yaml
+            **/app.config.ts
+            **/Dockerfile

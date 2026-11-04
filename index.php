@@ -1,32 +1,41 @@
 <?php
 declare(strict_types=1);
 
-$installed = is_file(__DIR__ . '/.installed') && is_file(__DIR__ . '/config.php');
+header('Content-Type: text/html; charset=utf-8');
+header('Cache-Control: no-store');
+header('Referrer-Policy: no-referrer');
+header('X-Content-Type-Options: nosniff');
+$assetVersion = (string) max(filemtime(__DIR__ . '/assets/site.js') ?: 0, filemtime(__DIR__ . '/assets/site.css') ?: 0);
+
+$allowedViews = ['login', 'forgot', 'home', 'agenda', 'clients', 'team', 'services', 'account', 'booking', 'history', 'reset'];
+$requestedView = isset($_GET['view']) ? (string)$_GET['view'] : 'login';
+$view = in_array($requestedView, $allowedViews, true) ? $requestedView : 'login';
 ?><!doctype html>
 <html lang="pt-BR">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#090a0c">
+    <meta name="description" content="Gestão de agenda do Barber Shop Sistemas HP">
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="referrer" content="no-referrer">
     <title>Barber Shop Sistemas HP</title>
-    <style>
-        :root { color-scheme: dark; --bg:#090a0c; --surface:#121417; --border:#2a2b2d; --gold:#e7b94e; --gold-soft:#f5d77f; --text:#f7f2e8; --muted:#9b9a95; --green:#63c79a; }
-        * { box-sizing:border-box; } body { margin:0; min-height:100vh; display:grid; place-items:center; background:radial-gradient(circle at 50% -10%, #2b2412, var(--bg) 52%); color:var(--text); font:16px/1.5 system-ui,-apple-system,Segoe UI,sans-serif; padding:24px; }
-        main { width:min(620px,100%); text-align:center; background:rgba(18,20,23,.95); border:1px solid var(--border); border-radius:24px; padding:34px 24px; box-shadow:0 22px 80px rgba(0,0,0,.35); }
-        .mark { color:var(--gold); font-size:11px; letter-spacing:3px; font-weight:800; } h1 { margin:12px 0 8px; font-size:30px; line-height:1.1; } p { color:var(--muted); margin:0 auto; max-width:480px; } .status { display:inline-flex; align-items:center; gap:8px; margin:24px 0 10px; border:1px solid rgba(99,199,154,.35); background:#12221b; color:#9be0ba; border-radius:999px; padding:8px 13px; font-size:13px; font-weight:700; } .dot { width:7px; height:7px; border-radius:50%; background:var(--green); } .rule { width:44px; height:2px; background:var(--gold); margin:22px auto; } .note { font-size:13px; } code { color:var(--gold-soft); }
-    </style>
+    <link rel="icon" href="assets/favicon.png" type="image/png">
+    <link rel="stylesheet" href="assets/site.css?v=<?= htmlspecialchars($assetVersion, ENT_QUOTES, 'UTF-8') ?>">
 </head>
 <body>
-<main>
-    <div class="mark">SISTEMAS HP</div>
-    <h1>Barber Shop Sistemas HP</h1>
-    <div class="rule"></div>
-    <?php if ($installed): ?>
-        <div class="status"><span class="dot"></span> Sistema instalado e banco configurado</div>
-        <p>Esta é a base online do Barber Shop. O próximo passo é conectar o aplicativo Android e iOS à API de agenda, clientes e sincronização.</p>
-    <?php else: ?>
-        <div class="status"><span class="dot"></span> Servidor online</div>
-        <p>O sistema ainda não foi instalado. Acesse <code>/install.php</code> para configurar o banco e criar o primeiro administrador.</p>
-    <?php endif; ?>
-</main>
+    <div id="app" data-view="<?= htmlspecialchars($view, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>">
+        <div class="boot-screen" role="status" aria-live="polite">
+            <img src="assets/logo.png" width="96" height="96" alt="Barber Shop Sistemas HP">
+            <span>Carregando seu espaço...</span>
+        </div>
+    </div>
+    <noscript>
+        <div class="noscript-message">Ative o JavaScript para usar a agenda online.</div>
+    </noscript>
+    <script>
+        window.BARBERSHOP_BOOTSTRAP = { view: <?= json_encode($view, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?> };
+    </script>
+    <script src="assets/site.js?v=<?= htmlspecialchars($assetVersion, ENT_QUOTES, 'UTF-8') ?>" defer></script>
 </body>
 </html>
