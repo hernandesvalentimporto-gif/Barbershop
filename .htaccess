@@ -1,0 +1,6 @@
+<FilesMatch "^(config\.php|\.installed)$">
+    Require all denied
+    Deny from all
+</FilesMatch>
+
+Options -Indexes

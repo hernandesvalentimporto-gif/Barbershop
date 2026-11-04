@@ -1,0 +1,33 @@
+name: Publicar Barber Shop no FTP
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Enviar arquivos para o FTP
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@v4
+
+      - name: Publicar na pasta barbershop
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER || secrets.FTP_HOST }}
+          username: ${{ secrets.FTP_USERNAME || secrets.FTP_USER }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          server-dir: ${{ secrets.FTP_SERVER_DIR || '/barbershop/' }}
+          protocol: ftp
+          state-name: .ftp-deploy-sync-state.json
+          exclude: |
+            **/.git*/**
+            **/.github/**
+            **/.ftp-deploy-sync-state.json
+            **/README*.md
+            **/config.example.php
