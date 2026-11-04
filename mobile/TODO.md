@@ -2,15 +2,15 @@
 
 Referência mais recente do usuário: logo original Barber Shop Sistemas HP, preto #080808 e dourado #E7B94E, cartões grafite e texto branco. Esta referência substitui Agenda Cobalto. Interface em português brasileiro. Estoque e financeiro da imagem são apenas referência visual, fora do escopo funcional aprovado.
 
-- [ ] Aplicativo Android compilável com geração de APK instalável. Preservar os identificadores do projeto; não confundir Preview com APK.
-- [ ] Login integrado à API existente, com acesso conforme o perfil de cliente, barbeiro ou administrador. Guardar token no armazenamento seguro nativo; não incluir credenciais do servidor no aplicativo.
-- [ ] Agendamento para clientes, incluindo consulta de serviços, barbeiros, datas e horários disponíveis. Confirmar no servidor; informar conflitos e erros de rede sem criar reservas fictícias.
-- [ ] Histórico do cliente com visualização dos agendamentos anteriores e atuais.
-- [ ] Agenda do barbeiro com visualização dos atendimentos marcados e ações autorizadas de status.
-- [ ] Gerenciamento básico de clientes pelo administrador: cadastro, edição e ativação/inativação, sem excluir histórico.
-- [ ] Gerenciamento básico de barbeiros pelo administrador: cadastro, edição e ativação/inativação, sem excluir histórico.
-- [ ] Gerenciamento básico de serviços pelo administrador: cadastro, edição, duração, preço e ativação/inativação.
-- [ ] Usar a foto da tabela de preços como referência editável no cadastro de serviços, mantendo valores encobertos pendentes de confirmação. Não inferir durações ausentes nem atualizar preços de produção automaticamente.
-- [ ] Integração com https://sistemashp.com.br/barbershop/api.php, preservando o servidor e o banco de dados atuais. Não executar testes de escrita em produção.
-- [ ] Alterações do repositório do usuário preparadas em branch separada, sem implantação automática ou alteração imediata do ambiente publicado. Complementos PHP necessários serão claramente indicados como pendentes de implantação.
-- [ ] Verificação independente e somente leitura da implementação, com correções dos problemas concretos encontrados.
+- [ ] Aplicativo Android compilável com geração de APK instalável. Preservar os identificadores do projeto; não confundir Preview com APK. Fonte e configuração prontas; o arquivo APK ainda depende da build oficial no painel Manus.
+- [x] Login integrado à API existente, com acesso conforme o perfil de cliente, barbeiro ou administrador. Guardar token no armazenamento seguro nativo; não incluir credenciais do servidor no aplicativo. Implementação revisada e testes de sessão aprovados; sem teste em dispositivo com credenciais reais.
+- [x] Agendamento para clientes, incluindo consulta de serviços, barbeiros, datas e horários disponíveis. Confirmar no servidor; informar conflitos e erros de rede sem criar reservas fictícias. Slots associados à seleção atual e respostas antigas descartadas.
+- [x] Histórico do cliente com visualização dos agendamentos anteriores e atuais.
+- [ ] Agenda do barbeiro com visualização dos atendimentos marcados e ações autorizadas de status. Implementada e revisada, mas os novos endpoints PHP ainda dependem de implantação aprovada. O fallback mostra somente a data correta.
+- [ ] Gerenciamento básico de clientes pelo administrador: cadastro, edição e ativação/inativação, sem excluir histórico. Implementado; novo endpoint preparado na branch, sem implantação de produção.
+- [ ] Gerenciamento básico de barbeiros pelo administrador: cadastro, edição e ativação/inativação, sem excluir histórico. Implementado; novo endpoint preparado na branch, sem implantação de produção.
+- [ ] Gerenciamento básico de serviços pelo administrador: cadastro, edição, duração, preço e ativação/inativação. Implementado; novo endpoint preparado na branch, sem implantação de produção.
+- [x] Usar a foto da tabela de preços como referência editável no cadastro de serviços, mantendo valores encobertos pendentes de confirmação. Não inferir durações ausentes nem atualizar preços de produção automaticamente. Sete preços legíveis carregam apenas o formulário; a duração permanece vazia e exige confirmação.
+- [x] Integração com https://sistemashp.com.br/barbershop/api.php, preservando o servidor e o banco de dados atuais. Não executar testes de escrita em produção. Base HTTPS verificada; chamadas administrativas dependem de publicação autorizada do complemento.
+- [x] Alterações do repositório do usuário preparadas em branch separada, sem implantação automática ou alteração imediata do ambiente publicado. Complementos PHP necessários serão claramente indicados como pendentes de implantação. Branch apk/android-app; main preservada; mobile e testes excluídos de FTP.
+- [x] Verificação independente e somente leitura da implementação, com correções dos problemas concretos encontrados. Revisão concluída, TypeScript e lint aprovados; 38 testes locais aprovados e 1 teste de autenticação do starter omitido. PHP: 14 testes puros e lint aprovados. Não há validação de dispositivo, integração MySQL ou transações reais na produção.

@@ -1,10 +1,18 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Text, View } from "react-native";
 
 import { api, isEndpointMissing } from "@/lib/barber/api";
 import { useBarber } from "@/lib/barber/context";
 import type { Appointment } from "@/lib/barber/types";
-import { formatBRL, formatDateTime, nextDateKeys } from "@/lib/barber/utils";
+import {
+  appointmentMatchesDate,
+  canTransitionAppointmentStatus,
+  formatBRL,
+  formatDateTime,
+  legalAppointmentStatusTransitions,
+  nextDateKeys,
+  type AppointmentActionStatus,
+} from "@/lib/barber/utils";
 import {
   Button,
   Card,
@@ -20,20 +28,20 @@ import {
   styles,
 } from "@/components/barber/ui";
 
-const STATUS_OPTIONS: ("confirmed" | "completed" | "no_show" | "cancelled")[] = ["confirmed", "completed", "no_show", "cancelled"];
-
 export default function AgendaScreen() {
-  const { user } = useBarber();
+  const { authReady, user } = useBarber();
   const dates = useMemo(() => nextDateKeys(), []);
   const [date, setDate] = useState(dates[0]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
-  const [changingId, setChangingId] = useState<number | null>(null);
+  const [changingIds, setChangingIds] = useState<Set<number>>(new Set());
   const [statusError, setStatusError] = useState<string | null>(null);
+  const statusLocksRef = useRef(new Set<number>());
 
   const load = useCallback(async () => {
+    if (!authReady || !user || (user.role !== "barber" && user.role !== "admin")) return;
     setLoading(true);
     setError(null);
     setFallbackNotice(null);
@@ -45,9 +53,14 @@ export default function AgendaScreen() {
         try {
           const summary = await api.summary();
           const data = summary.data as any;
-          const fallback = Array.isArray(data?.today_appointments) ? data.today_appointments : Array.isArray(data?.appointments) ? data.appointments : [];
+          const source = Array.isArray(data?.today_appointments)
+            ? data.today_appointments
+            : Array.isArray(data?.appointments)
+              ? data.appointments
+              : [];
+          const fallback = source.filter((appointment: Appointment) => appointmentMatchesDate(appointment, date));
           setAppointments(fallback);
-          setFallbackNotice(`${requestError.message} Exibindo apenas o resumo devolvido pelo servidor; ele pode não corresponder à data selecionada.`);
+          setFallbackNotice(`${requestError.message} Exibindo somente atendimentos cuja data retornada corresponde a ${date}.`);
         } catch (fallbackError) {
           setError(fallbackError instanceof Error ? fallbackError.message : requestError.message);
         }
@@ -57,16 +70,18 @@ export default function AgendaScreen() {
     } finally {
       setLoading(false);
     }
-  }, [date]);
+  }, [authReady, date, user]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!authReady || !user || (user.role !== "barber" && user.role !== "admin")) return;
     const timer = setTimeout(() => void load(), 0);
     return () => clearTimeout(timer);
-  }, [load, user]);
+  }, [authReady, load, user]);
 
-  async function changeStatus(appointment: Appointment, status: (typeof STATUS_OPTIONS)[number]) {
-    setChangingId(appointment.id);
+  async function changeStatus(appointment: Appointment, status: AppointmentActionStatus) {
+    if (!canTransitionAppointmentStatus(appointment.status, status) || statusLocksRef.current.has(appointment.id)) return;
+    statusLocksRef.current.add(appointment.id);
+    setChangingIds((current) => new Set(current).add(appointment.id));
     setStatusError(null);
     try {
       await api.appointmentStatus(appointment.id, status);
@@ -74,11 +89,16 @@ export default function AgendaScreen() {
     } catch (requestError) {
       setStatusError(requestError instanceof Error ? requestError.message : "Não foi possível alterar o status.");
     } finally {
-      setChangingId(null);
+      statusLocksRef.current.delete(appointment.id);
+      setChangingIds((current) => {
+        const next = new Set(current);
+        next.delete(appointment.id);
+        return next;
+      });
     }
   }
 
-  if (!user) return null;
+  if (!authReady || !user || (user.role !== "barber" && user.role !== "admin")) return null;
   return (
     <Screen>
       <Header title="Agenda" subtitle={user.role === "admin" ? "Acompanhe os atendimentos da equipe." : "Seus atendimentos e respectivos status."} right={<Button variant="ghost" icon="refresh-cw" onPress={() => void load()}>Atualizar</Button>} />
@@ -91,23 +111,26 @@ export default function AgendaScreen() {
       {loading ? <LoadingState label="Carregando agenda..." /> : null}
       {!loading && error ? <ErrorState message={error} onRetry={() => void load()} /> : null}
       {!loading && !error && !appointments.length ? <EmptyState icon="calendar" title="Nenhum atendimento nesta data" text="Os dados exibidos dependem da agenda retornada pelo servidor." /> : null}
-      {!loading && !error ? appointments.map((appointment) => (
-        <Card key={appointment.id}>
-          <View style={styles.row}>
-            <View style={{ flex: 1, gap: 4 }}>
-              <Text style={styles.sectionTitle}>{appointment.client_name ?? "Cliente"}</Text>
-              <Text style={styles.body}>{formatDateTime(appointment.starts_at)}</Text>
+      {!loading && !error ? appointments.map((appointment) => {
+        const allowedStatuses = legalAppointmentStatusTransitions(appointment.status);
+        return (
+          <Card key={appointment.id}>
+            <View style={styles.row}>
+              <View style={{ flex: 1, gap: 4 }}>
+                <Text style={styles.sectionTitle}>{appointment.client_name ?? "Cliente"}</Text>
+                <Text style={styles.body}>{formatDateTime(appointment.starts_at)}</Text>
+              </View>
+              <StatusBadge status={appointment.status} />
             </View>
-            <StatusBadge status={appointment.status} />
-          </View>
-          <Text style={styles.muted}>{appointment.service_name ?? "Serviço não informado"}{appointment.barber_name && user.role === "admin" ? ` · ${appointment.barber_name}` : ""}</Text>
-          {typeof appointment.price_cents === "number" ? <Text style={styles.gold}>{formatBRL(appointment.price_cents)}</Text> : null}
-          {appointment.notes ? <Text style={styles.muted}>Observação: {appointment.notes}</Text> : null}
-          <View style={styles.wrap}>
-            {STATUS_OPTIONS.map((status) => <ChoiceChip key={status} label={status.replace("_", " ")} selected={appointment.status === status} disabled={changingId === appointment.id} onPress={() => void changeStatus(appointment, status)} />)}
-          </View>
-        </Card>
-      )) : null}
+            <Text style={styles.muted}>{appointment.service_name ?? "Serviço não informado"}{appointment.barber_name && user.role === "admin" ? ` · ${appointment.barber_name}` : ""}</Text>
+            {typeof appointment.price_cents === "number" ? <Text style={styles.gold}>{formatBRL(appointment.price_cents)}</Text> : null}
+            {appointment.notes ? <Text style={styles.muted}>Observação: {appointment.notes}</Text> : null}
+            {allowedStatuses.length ? <View style={styles.wrap}>
+              {allowedStatuses.map((status) => <ChoiceChip key={status} label={status.replace("_", " ")} selected={false} disabled={changingIds.has(appointment.id)} onPress={() => void changeStatus(appointment, status)} />)}
+            </View> : null}
+          </Card>
+        );
+      }) : null}
     </Screen>
   );
 }

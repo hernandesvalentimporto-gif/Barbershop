@@ -227,16 +227,16 @@ export function StatusBadge({ status }: { status: string }) {
   return <Text style={[styles.statusBadge, { color, borderColor: color }]}>{statusLabel(status)}</Text>;
 }
 
-export function ConfirmModal({ visible, title, message, confirmLabel = "Confirmar", danger = false, onCancel, onConfirm }: { visible: boolean; title: string; message: string; confirmLabel?: string; danger?: boolean; onCancel: () => void; onConfirm: () => void }) {
+export function ConfirmModal({ visible, title, message, confirmLabel = "Confirmar", danger = false, loading = false, disabled = false, onCancel, onConfirm }: { visible: boolean; title: string; message: string; confirmLabel?: string; danger?: boolean; loading?: boolean; disabled?: boolean; onCancel: () => void; onConfirm: () => void }) {
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={loading || disabled ? undefined : onCancel}>
       <View style={styles.modalBackdrop}>
         <View style={styles.modalCard}>
           <Text style={styles.modalTitle}>{title}</Text>
           <Text style={styles.modalMessage}>{message}</Text>
           <View style={styles.modalActions}>
-            <Button variant="ghost" onPress={onCancel}>Voltar</Button>
-            <Button variant={danger ? "danger" : "primary"} onPress={onConfirm}>{confirmLabel}</Button>
+            <Button variant="ghost" disabled={loading || disabled} onPress={onCancel}>Voltar</Button>
+            <Button variant={danger ? "danger" : "primary"} loading={loading} disabled={disabled} onPress={onConfirm}>{confirmLabel}</Button>
           </View>
         </View>
       </View>

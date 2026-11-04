@@ -4,13 +4,12 @@ import type { ExpoConfig } from "expo/config";
 // Identificadores gerados no projeto Manus: preservar para atualizações futuras.
 const bundleId = "space.manus.barberhp.t054228665129522";
 const scheme = "manus054228665129522";
-const logoUrl = "https://files.manuscdn.com/user_upload_by_module/session_file/310419663030234316/oEqQNEVtWoigIZhQ.png";
 
 const config: ExpoConfig & { logoUrl: string } = {
   name: "Barber Shop Sistemas HP",
   slug: "barberhp",
   version: "1.0.0",
-  logoUrl,
+  logoUrl: "https://files.manuscdn.com/user_upload_by_module/session_file/310419663030234316/oEqQNEVtWoigIZhQ.png",
   orientation: "portrait",
   icon: "./assets/images/icon.png",
   scheme,

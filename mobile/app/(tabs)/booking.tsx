@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Text, View } from "react-native";
 
 import { api } from "@/lib/barber/api";
+import { useBarber } from "@/lib/barber/context";
 import type { AvailabilitySlot, Catalog } from "@/lib/barber/types";
-import { formatBRL, formatTime, nextDateKeys } from "@/lib/barber/utils";
+import { bookingSelectionKey, formatBRL, formatTime, nextDateKeys } from "@/lib/barber/utils";
 import {
   BARBER_COLORS,
   Button,
@@ -20,6 +21,7 @@ import {
 } from "@/components/barber/ui";
 
 export default function BookingScreen() {
+  const { authReady, user } = useBarber();
   const dates = useMemo(() => nextDateKeys(), []);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(true);
@@ -30,13 +32,27 @@ export default function BookingScreen() {
   const [slots, setSlots] = useState<AvailabilitySlot[]>([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [slotsError, setSlotsError] = useState<string | null>(null);
+  const [availabilityRetry, setAvailabilityRetry] = useState(0);
   const [selectedSlot, setSelectedSlot] = useState<AvailabilitySlot | null>(null);
+  const [selectedSlotKey, setSelectedSlotKey] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState<{ id: number; status: string } | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  const availabilitySequenceRef = useRef(0);
+  const selectionKeyRef = useRef("");
+  const selectedSlotKeyRef = useRef<string | null>(null);
+  const confirmLockRef = useRef(false);
+  const selectionKey = bookingSelectionKey({ date, barberId, serviceId });
+
+  useEffect(() => {
+    selectionKeyRef.current = selectionKey;
+    selectedSlotKeyRef.current = selectedSlotKey;
+  }, [selectionKey, selectedSlotKey]);
+
   async function loadCatalog() {
+    if (!user || user.role !== "client") return;
     setCatalogLoading(true);
     setCatalogError(null);
     try {
@@ -52,51 +68,92 @@ export default function BookingScreen() {
   }
 
   useEffect(() => {
+    if (!authReady || !user || user.role !== "client") return;
     const timer = setTimeout(() => void loadCatalog(), 0);
     return () => clearTimeout(timer);
-    // Catalog is loaded once; subsequent selection effects only query availability.
+    // Catalog is loaded once per authenticated client; selection effects only query availability.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [authReady, user?.id, user?.role]);
+
+  function invalidateSelection() {
+    // Increment before React re-renders so a response resolving in this same
+    // tick cannot repopulate slots for the previous dimensions.
+    availabilitySequenceRef.current += 1;
+    setSlots([]);
+    setSlotsLoading(false);
+    setSlotsError(null);
+    setSelectedSlot(null);
+    setSelectedSlotKey(null);
+    setSubmitError(null);
+  }
 
   useEffect(() => {
-    if (!serviceId || !barberId || !date) return;
+    if (!authReady || !user || user.role !== "client" || !serviceId || !barberId || !date) {
+      return;
+    }
+    const requestSequence = availabilitySequenceRef.current;
+    const requestKey = selectionKey;
     let active = true;
+    const isCurrent = () =>
+      active &&
+      requestSequence === availabilitySequenceRef.current &&
+      selectionKeyRef.current === requestKey;
+
     const timer = setTimeout(() => {
       setSlotsLoading(true);
       setSlotsError(null);
       api.availability(date, barberId, serviceId)
         .then((result) => {
-          if (active) setSlots(result.slots ?? []);
+          if (isCurrent()) setSlots(result.slots ?? []);
         })
         .catch((error) => {
-          if (active) setSlotsError(error instanceof Error ? error.message : "Não foi possível buscar horários.");
+          if (isCurrent()) setSlotsError(error instanceof Error ? error.message : "Não foi possível buscar horários.");
         })
         .finally(() => {
-          if (active) setSlotsLoading(false);
+          if (isCurrent()) setSlotsLoading(false);
         });
     }, 0);
     return () => {
       active = false;
       clearTimeout(timer);
     };
-  }, [date, barberId, serviceId]);
+  }, [authReady, user, date, barberId, serviceId, selectionKey, availabilityRetry]);
+
+  function retryAvailability() {
+    invalidateSelection();
+    setAvailabilityRetry((current) => current + 1);
+  }
 
   async function confirmBooking() {
-    if (!selectedSlot || !serviceId || !barberId) return;
+    if (confirmLockRef.current || !selectedSlot || !serviceId || !barberId) return;
+    const keyAtStart = selectionKey;
+    if (selectedSlotKey !== keyAtStart || !bookingSelectionKey({ date, barberId, serviceId })) {
+      setSelectedSlot(null);
+      setSelectedSlotKey(null);
+      setSubmitError("O horário selecionado não pertence mais à combinação atual. Escolha outro horário.");
+      return;
+    }
+    confirmLockRef.current = true;
     setSubmitting(true);
     setSubmitError(null);
+    const slotAtStart = selectedSlot;
     try {
       const result = await api.appointmentCreate({
         barber_id: barberId,
         service_id: serviceId,
-        starts_at: selectedSlot.starts_at,
-        ends_at: selectedSlot.ends_at,
+        starts_at: slotAtStart.starts_at,
+        ends_at: slotAtStart.ends_at,
         notes: notes.trim() || undefined,
       });
+      if (selectionKeyRef.current !== keyAtStart || selectedSlotKeyRef.current !== keyAtStart) {
+        setSubmitError("O agendamento foi processado, mas a seleção mudou antes da confirmação visual. Consulte seu histórico.");
+        return;
+      }
       setSuccess({ id: result.appointment_id, status: result.status });
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : "Não foi possível confirmar o agendamento.");
     } finally {
+      confirmLockRef.current = false;
       setSubmitting(false);
     }
   }
@@ -104,9 +161,12 @@ export default function BookingScreen() {
   function resetBooking() {
     setSuccess(null);
     setSelectedSlot(null);
+    setSelectedSlotKey(null);
     setNotes("");
     setSubmitError(null);
   }
+
+  if (!authReady || !user || user.role !== "client") return null;
 
   if (success) {
     return (
@@ -133,26 +193,26 @@ export default function BookingScreen() {
           <Card>
             <Text style={styles.sectionTitle}>1. Serviço</Text>
             <View style={styles.wrap}>
-              {catalog.services.length ? catalog.services.map((service) => <ChoiceChip key={service.id} label={`${service.name} · ${formatBRL(service.price_cents)}`} selected={service.id === serviceId} onPress={() => { setServiceId(service.id); setSubmitError(null); }} />) : <Text style={styles.muted}>Nenhum serviço disponível.</Text>}
+              {catalog.services.length ? catalog.services.map((service) => <ChoiceChip key={service.id} label={`${service.name} · ${formatBRL(service.price_cents)}`} selected={service.id === serviceId} disabled={submitting} onPress={() => { invalidateSelection(); setServiceId(service.id); }} />) : <Text style={styles.muted}>Nenhum serviço disponível.</Text>}
             </View>
             {serviceId ? <Text style={styles.muted}>{catalog.services.find((item) => item.id === serviceId)?.duration_minutes ?? "—"} minutos de duração</Text> : null}
           </Card>
           <Card>
             <Text style={styles.sectionTitle}>2. Barbeiro</Text>
             <View style={styles.wrap}>
-              {catalog.barbers.length ? catalog.barbers.map((barber) => <ChoiceChip key={barber.id} label={barber.name} selected={barber.id === barberId} onPress={() => { setBarberId(barber.id); setSubmitError(null); }} />) : <Text style={styles.muted}>Nenhum barbeiro disponível.</Text>}
+              {catalog.barbers.length ? catalog.barbers.map((barber) => <ChoiceChip key={barber.id} label={barber.name} selected={barber.id === barberId} disabled={submitting} onPress={() => { invalidateSelection(); setBarberId(barber.id); }} />) : <Text style={styles.muted}>Nenhum barbeiro disponível.</Text>}
             </View>
           </Card>
           <Card>
             <Text style={styles.sectionTitle}>3. Data</Text>
-            <DateStrip dates={dates} selected={date} onSelect={(value) => { setDate(value); setSubmitError(null); }} />
+            <DateStrip dates={dates} selected={date} onSelect={(value) => { if (!submitting) { invalidateSelection(); setDate(value); } }} />
           </Card>
           <Card>
             <Text style={styles.sectionTitle}>4. Horário disponível</Text>
             {slotsLoading ? <LoadingState label="Buscando horários..." /> : null}
-            {!slotsLoading && slotsError ? <ErrorState message={slotsError} /> : null}
+            {!slotsLoading && slotsError ? <ErrorState message={slotsError} onRetry={retryAvailability} /> : null}
             {!slotsLoading && !slotsError && !slots.length ? <Text style={styles.muted}>Nenhum horário disponível para esta combinação.</Text> : null}
-            {!slotsLoading && slots.length ? <View style={styles.wrap}>{slots.map((slot) => <ChoiceChip key={`${slot.starts_at}-${slot.ends_at}`} label={formatTime(slot.starts_at)} selected={selectedSlot?.starts_at === slot.starts_at} onPress={() => setSelectedSlot(slot)} />)}</View> : null}
+            {!slotsLoading && slots.length ? <View style={styles.wrap}>{slots.map((slot) => <ChoiceChip key={`${slot.starts_at}-${slot.ends_at}`} label={formatTime(slot.starts_at)} selected={selectedSlot?.starts_at === slot.starts_at} disabled={submitting} onPress={() => { setSelectedSlot(slot); setSelectedSlotKey(selectionKeyRef.current); setSubmitError(null); }} />)}</View> : null}
           </Card>
           <Card>
             <Text style={styles.sectionTitle}>5. Observações (opcional)</Text>

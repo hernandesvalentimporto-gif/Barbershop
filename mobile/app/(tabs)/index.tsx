@@ -23,7 +23,7 @@ import {
 } from "@/components/barber/ui";
 
 function LoginScreen() {
-  const { login, busy, authError, clearAuthError } = useBarber();
+  const { login, busy, authError, storageError, retryStorageCleanup, clearAuthError } = useBarber();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -90,6 +90,7 @@ function LoginScreen() {
           </View>
         </View>
         {validation || authError ? <Notice tone="danger">{validation ?? authError}</Notice> : null}
+        {storageError ? <Button variant="secondary" loading={busy} onPress={() => void retryStorageCleanup()}>Tentar limpar sessão</Button> : null}
         <Button onPress={submit} loading={busy} icon="log-in">Entrar</Button>
         <Notice>{WEB_STORAGE_WARNING}</Notice>
       </View>
@@ -186,7 +187,10 @@ function Metric({ label, value }: { label: string; value: string }) {
 }
 
 export default function IndexScreen() {
-  const { authReady, user } = useBarber();
+  const { authReady, authStatus, authError, retryRestore, user } = useBarber();
   if (!authReady) return <Screen scroll={false}><LoadingState label="Verificando sessão..." /></Screen>;
+  if (authStatus === "restore_error" && !user) {
+    return <Screen contentStyle={{ justifyContent: "center" }}><BrandHeader subtitle="Sua agenda, do seu jeito" /><ErrorState message={authError ?? "Não foi possível restaurar a sessão."} onRetry={() => void retryRestore()} /></Screen>;
+  }
   return user ? <HomeScreen /> : <LoginScreen />;
 }

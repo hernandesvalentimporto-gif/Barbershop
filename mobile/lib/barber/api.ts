@@ -17,8 +17,11 @@ export const API_BASE_URL =
   process.env.EXPO_PUBLIC_BARBERSHOP_API_URL ?? "https://sistemashp.com.br/barbershop/api.php";
 export const REQUEST_TIMEOUT_MS = 15_000;
 
+type UnauthorizedHandler = (capturedToken: string, capturedGeneration: number) => void | Promise<void>;
+
 let authToken: string | null = null;
-let unauthorizedHandler: (() => void | Promise<void>) | null = null;
+let authGeneration = 0;
+let unauthorizedHandler: UnauthorizedHandler | null = null;
 
 export class ApiError extends Error {
   readonly status?: number;
@@ -41,9 +44,18 @@ export class ApiError extends Error {
 
 export function setAuthToken(token: string | null): void {
   authToken = token;
+  authGeneration += 1;
 }
 
-export function registerUnauthorizedHandler(handler: (() => void | Promise<void>) | null): void {
+export function getAuthToken(): string | null {
+  return authToken;
+}
+
+export function getAuthSessionGeneration(): number {
+  return authGeneration;
+}
+
+export function registerUnauthorizedHandler(handler: UnauthorizedHandler | null): void {
   unauthorizedHandler = handler;
 }
 
@@ -69,9 +81,22 @@ function parsePayload(text: string): unknown {
   }
 }
 
-function errorMessage(payload: any, fallback: string): string {
+function errorMessage(payload: unknown, fallback: string): string {
   if (typeof payload === "string") return payload;
-  return payload?.error ?? payload?.message ?? payload?.detail ?? fallback;
+  if (!payload || typeof payload !== "object") return fallback;
+  const data = payload as { error?: unknown; message?: unknown; detail?: unknown };
+  if (data.error !== undefined && data.error !== null && data.error !== "") return String(data.error);
+  if (data.message !== undefined && data.message !== null && data.message !== "") return String(data.message);
+  if (data.detail !== undefined && data.detail !== null && data.detail !== "") return String(data.detail);
+  return fallback;
+}
+
+function payloadCode(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== "object") return undefined;
+  const data = payload as { error?: unknown; code?: unknown };
+  // The PHP contract uses `error`; keep it ahead of the older `code` field.
+  const value = data.error ?? data.code;
+  return value === undefined || value === null || value === "" ? undefined : String(value);
 }
 
 export async function request<T>(
@@ -81,9 +106,11 @@ export async function request<T>(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   const method = options.method ?? "GET";
+  const tokenAtStart = authToken;
+  const generationAtStart = authGeneration;
   const headers: Record<string, string> = { Accept: "application/json" };
   if (options.body !== undefined) headers["Content-Type"] = "application/json";
-  if (authToken) headers.Authorization = `Bearer ${authToken}`;
+  if (tokenAtStart) headers.Authorization = `Bearer ${tokenAtStart}`;
 
   try {
     const response = await fetch(actionUrl(action, options.query), {
@@ -94,15 +121,30 @@ export async function request<T>(
     });
     const payload = parsePayload(await response.text());
     if (!response.ok) {
-      const code = typeof payload === "object" && payload ? String((payload as any).code ?? "") : undefined;
-      const endpointMissing =
-        response.status === 404 ||
-        response.status === 405 ||
-        code === "endpoint_missing" ||
-        (typeof payload === "object" && payload ? (payload as any).endpoint_missing === true : false);
-      if (response.status === 401) {
-        authToken = null;
-        await unauthorizedHandler?.();
+      const code = payloadCode(payload);
+      // Only these PHP error values mean that the action itself is absent. A 404
+      // may be an entity lookup failure, and 405 may be an action-level error.
+      const endpointMissing = code === "not_found" || code === "endpoint_missing";
+      if (
+        response.status === 401 &&
+        tokenAtStart !== null &&
+        tokenAtStart === authToken &&
+        generationAtStart === authGeneration
+      ) {
+        const handler = unauthorizedHandler;
+        if (handler) {
+          try {
+            await handler(tokenAtStart, generationAtStart);
+          } catch {
+            // Session cleanup must not turn the original 401 into a network error.
+          }
+        }
+        // The context handler normally clears this too. Keep the transport
+        // safe when no handler is installed or a test/application handler is
+        // observational only, but never clear a newer generation.
+        if (tokenAtStart === authToken && generationAtStart === authGeneration) {
+          setAuthToken(null);
+        }
       }
       throw new ApiError(
         endpointMissing

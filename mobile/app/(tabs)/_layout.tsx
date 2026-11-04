@@ -1,5 +1,5 @@
 import Feather from "@expo/vector-icons/Feather";
-import { Tabs } from "expo-router";
+import { Redirect, Tabs, useSegments } from "expo-router";
 import React from "react";
 import { Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -14,12 +14,21 @@ function Icon({ name, color, size }: { name: React.ComponentProps<typeof Feather
 
 export default function TabLayout() {
   const { user, authReady } = useBarber();
+  const segments = useSegments();
   const insets = useSafeAreaInsets();
   const bottomPadding = Platform.OS === "web" ? 10 : Math.max(insets.bottom, 8);
   const tabBarHeight = 60 + bottomPadding;
   const isClient = user?.role === "client";
   const isStaff = user?.role === "barber" || user?.role === "admin";
   const isAdmin = user?.role === "admin";
+  const route = segments[segments.length - 1];
+  const clientRoute = route === "booking" || route === "history";
+  const staffRoute = route === "agenda";
+  const adminRoute = route === "clients" || route === "services";
+
+  if (authReady && (!user || (clientRoute && !isClient) || (staffRoute && !isStaff) || (adminRoute && !isAdmin))) {
+    return <Redirect href="/" />;
+  }
 
   return (
     <Tabs

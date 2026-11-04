@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Text, View } from "react-native";
 
 import { api } from "@/lib/barber/api";
+import { useBarber } from "@/lib/barber/context";
 import type { ClientHistoryAppointment } from "@/lib/barber/types";
 import { formatDateTime, isAppointmentCancellable } from "@/lib/barber/utils";
 import {
@@ -19,14 +20,17 @@ import {
 } from "@/components/barber/ui";
 
 export default function HistoryScreen() {
+  const { authReady, user } = useBarber();
   const [appointments, setAppointments] = useState<ClientHistoryAppointment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<ClientHistoryAppointment | null>(null);
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [cancellingId, setCancellingId] = useState<number | null>(null);
+  const cancelLocksRef = useRef(new Set<number>());
 
   const load = useCallback(async () => {
+    if (!authReady || !user || user.role !== "client") return;
     setLoading(true);
     setError(null);
     try {
@@ -37,27 +41,34 @@ export default function HistoryScreen() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [authReady, user]);
 
   useEffect(() => {
+    if (!authReady || !user || user.role !== "client") return;
     const timer = setTimeout(() => void load(), 0);
     return () => clearTimeout(timer);
-  }, [load]);
+  }, [authReady, load, user]);
 
   async function cancelAppointment() {
-    if (!cancelTarget) return;
-    setCancellingId(cancelTarget.id);
+    if (!cancelTarget || cancelLocksRef.current.has(cancelTarget.id)) return;
+    const appointmentId = cancelTarget.id;
+    cancelLocksRef.current.add(appointmentId);
+    setCancellingId(appointmentId);
     setCancelError(null);
     try {
-      await api.appointmentCancel(cancelTarget.id);
+      await api.appointmentCancel(appointmentId);
       setCancelTarget(null);
       await load();
     } catch (requestError) {
       setCancelError(requestError instanceof Error ? requestError.message : "Não foi possível cancelar o agendamento.");
     } finally {
-      setCancellingId(null);
+      cancelLocksRef.current.delete(appointmentId);
+      setCancellingId((current) => (current === appointmentId ? null : current));
     }
   }
+
+  if (!authReady || !user || user.role !== "client") return null;
+  const cancelling = cancelTarget ? cancellingId === cancelTarget.id : false;
 
   return (
     <Screen>
@@ -76,7 +87,7 @@ export default function HistoryScreen() {
             <StatusBadge status={appointment.status} />
           </View>
           {appointment.barber_name ? <Text style={styles.muted}>Barbeiro: {appointment.barber_name}</Text> : null}
-          {isAppointmentCancellable(appointment) ? <Button variant="danger" icon="x-circle" loading={cancellingId === appointment.id} onPress={() => { setCancelError(null); setCancelTarget(appointment); }}>Cancelar agendamento</Button> : null}
+          {isAppointmentCancellable(appointment) ? <Button variant="danger" icon="x-circle" loading={cancellingId === appointment.id} disabled={cancellingId !== null && cancellingId !== appointment.id} onPress={() => { setCancelError(null); setCancelTarget(appointment); }}>Cancelar agendamento</Button> : null}
         </Card>
       )) : null}
       <ConfirmModal
@@ -85,7 +96,9 @@ export default function HistoryScreen() {
         message={cancelTarget ? `${cancelTarget.service_name ?? "Este serviço"} em ${formatDateTime(cancelTarget.starts_at)} será cancelado somente após confirmação do servidor.` : ""}
         confirmLabel="Sim, cancelar"
         danger
-        onCancel={() => { if (!cancellingId) setCancelTarget(null); }}
+        loading={cancelling}
+        disabled={Boolean(cancellingId && !cancelling)}
+        onCancel={() => { if (!cancelling) setCancelTarget(null); }}
         onConfirm={() => void cancelAppointment()}
       />
     </Screen>

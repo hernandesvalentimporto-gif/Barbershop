@@ -4,6 +4,38 @@ export const DAY_KEYS = Array.from({ length: 14 }, (_, index) => index);
 
 const pad = (value: number) => String(value).padStart(2, "0");
 
+export type BookingSelection = {
+  date: string;
+  barberId: number | null;
+  serviceId: number | null;
+};
+
+export function bookingSelectionKey(selection: BookingSelection): string {
+  return `${selection.date}|barber:${selection.barberId ?? "none"}|service:${selection.serviceId ?? "none"}`;
+}
+
+export function bookingSelectionMatches(key: string, selection: BookingSelection): boolean {
+  return key === bookingSelectionKey(selection);
+}
+
+export type AppointmentActionStatus = "confirmed" | "completed" | "no_show" | "cancelled";
+
+const LEGAL_STATUS_TRANSITIONS: Record<string, readonly AppointmentActionStatus[]> = {
+  pending: ["confirmed", "cancelled"],
+  confirmed: ["completed", "no_show", "cancelled"],
+  completed: [],
+  no_show: [],
+  cancelled: [],
+};
+
+export function legalAppointmentStatusTransitions(status: string): AppointmentActionStatus[] {
+  return [...(LEGAL_STATUS_TRANSITIONS[status] ?? [])];
+}
+
+export function canTransitionAppointmentStatus(from: string, to: AppointmentActionStatus): boolean {
+  return legalAppointmentStatusTransitions(from).includes(to);
+}
+
 export function toDateKey(date: Date): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
@@ -56,6 +88,14 @@ export function formatDateTime(value: string): string {
     : new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(parsed);
 }
 
+/** Match the server's calendar date without relabeling today's data as another day. */
+export function appointmentMatchesDate(appointment: Pick<Appointment, "starts_at">, dateKey: string): boolean {
+  const local = localParts(appointment.starts_at);
+  if (local) return `${local[0]}-${pad(local[1])}-${pad(local[2])}` === dateKey;
+  const parsed = new Date(appointment.starts_at);
+  return !Number.isNaN(parsed.getTime()) && toDateKey(parsed) === dateKey;
+}
+
 export function formatBRL(cents: number): string {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(cents / 100);
 }
@@ -84,7 +124,7 @@ export function statusLabel(status: string): string {
 }
 
 export function isAppointmentCancellable(appointment: Pick<Appointment, "status">): boolean {
-  return !["cancelled", "completed", "no_show"].includes(appointment.status);
+  return legalAppointmentStatusTransitions(appointment.status).includes("cancelled");
 }
 
 export function isActive(value: unknown): boolean {
