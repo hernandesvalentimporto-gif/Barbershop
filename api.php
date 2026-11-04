@@ -155,6 +155,34 @@ if ($action === 'sync' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     jsonResponse(['ok' => true, 'accepted' => $accepted, 'queued' => count($accepted)]);
 }
 
+if ($action === 'appointment_create' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $data = body();
+    $clientId = (int)($data['client_id'] ?? 0);
+    $barberId = (int)($data['barber_id'] ?? 0);
+    $serviceId = (int)($data['service_id'] ?? 0);
+    $startsAt = trim((string)($data['starts_at'] ?? ''));
+    $endsAt = trim((string)($data['ends_at'] ?? ''));
+    $notes = trim((string)($data['notes'] ?? ''));
+    if ($user['role'] === 'client') $clientId = (int)$user['id'];
+    if ($user['role'] === 'barber') $barberId = (int)$user['id'];
+    if ($clientId < 1 || $barberId < 1 || $serviceId < 1 || $startsAt === '' || $endsAt === '') jsonResponse(['ok' => false, 'error' => 'invalid_appointment'], 422);
+    $conflict = $pdo->prepare("SELECT id FROM `{$prefix}appointments` WHERE barber_id = ? AND status IN ('pending','confirmed') AND starts_at < ? AND ends_at > ? LIMIT 1");
+    $conflict->execute([$barberId, $endsAt, $startsAt]);
+    if ($conflict->fetch()) jsonResponse(['ok' => false, 'error' => 'appointment_conflict'], 409);
+    $insert = $pdo->prepare("INSERT INTO `{$prefix}appointments` (`client_id`, `barber_id`, `service_id`, `starts_at`, `ends_at`, `status`, `notes`) VALUES (?, ?, ?, ?, ?, 'pending', ?)");
+    $insert->execute([$clientId, $barberId, $serviceId, $startsAt, $endsAt, $notes !== '' ? $notes : null]);
+    jsonResponse(['ok' => true, 'appointment_id' => (int)$pdo->lastInsertId(), 'status' => 'pending'], 201);
+}
+
+if ($action === 'appointment_cancel' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $appointmentId = (int)(body()['appointment_id'] ?? 0);
+    if ($appointmentId < 1) jsonResponse(['ok' => false, 'error' => 'invalid_appointment'], 422);
+    $cancel = $pdo->prepare("UPDATE `{$prefix}appointments` SET status = 'cancelled' WHERE id = ? AND status IN ('pending','confirmed') AND (client_id = ? OR barber_id = ? OR ? = 'admin')");
+    $cancel->execute([$appointmentId, (int)$user['id'], (int)$user['id'], $user['role']]);
+    if ($cancel->rowCount() < 1) jsonResponse(['ok' => false, 'error' => 'appointment_not_found'], 404);
+    jsonResponse(['ok' => true, 'appointment_id' => $appointmentId, 'status' => 'cancelled']);
+}
+
 if ($action === 'summary') {
     $response = ['ok' => true, 'user' => $user, 'data' => []];
     if ($user['role'] === 'admin') {
@@ -165,8 +193,11 @@ if ($action === 'summary') {
         $stmt = $pdo->prepare("SELECT COUNT(*) FROM `{$prefix}appointments` WHERE barber_id = ? AND starts_at >= CURDATE() AND starts_at < DATE_ADD(CURDATE(), INTERVAL 1 DAY) AND status IN ('pending','confirmed')");
         $stmt->execute([(int)$user['id']]);
         $response['data']['today_appointments'] = (int)$stmt->fetchColumn();
+        $list = $pdo->prepare("SELECT a.id, a.starts_at, a.ends_at, a.status, u.name AS client_name, s.name AS service_name FROM `{$prefix}appointments` a LEFT JOIN `{$prefix}users` u ON u.id = a.client_id LEFT JOIN `{$prefix}services` s ON s.id = a.service_id WHERE a.barber_id = ? AND a.starts_at >= CURDATE() ORDER BY a.starts_at ASC LIMIT 20");
+        $list->execute([(int)$user['id']]);
+        $response['data']['appointments'] = $list->fetchAll();
     } else {
-        $stmt = $pdo->prepare("SELECT id, starts_at, ends_at, status FROM `{$prefix}appointments` WHERE client_id = ? AND starts_at >= NOW() ORDER BY starts_at ASC LIMIT 5");
+        $stmt = $pdo->prepare("SELECT a.id, a.starts_at, a.ends_at, a.status, u.name AS barber_name, s.name AS service_name FROM `{$prefix}appointments` a LEFT JOIN `{$prefix}users` u ON u.id = a.barber_id LEFT JOIN `{$prefix}services` s ON s.id = a.service_id WHERE a.client_id = ? AND a.starts_at >= NOW() ORDER BY a.starts_at ASC LIMIT 5");
         $stmt->execute([(int)$user['id']]);
         $response['data']['upcoming'] = $stmt->fetchAll();
     }
