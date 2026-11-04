@@ -472,6 +472,7 @@
         const password = input('password', 'login-password', '', { autocomplete: 'current-password', required: true, maxlength: 4096, placeholder: 'Sua senha' });
         const message = el('p', { className: 'form-message', role: 'alert', 'aria-live': 'polite' });
         const submit = button('Entrar', 'button block');
+        submit.type = 'submit';
         form.append(field('E-mail', email), field('Senha', password), message, submit);
         form.addEventListener('submit', async (event) => {
             event.preventDefault();
@@ -500,6 +501,7 @@
         const email = input('email', 'forgot-email', '', { autocomplete: 'email', required: true, maxlength: 190, placeholder: 'voce@exemplo.com' });
         const message = el('p', { className: 'form-message', role: 'status', 'aria-live': 'polite' });
         const submit = button('Enviar instruções', 'button block');
+        submit.type = 'submit';
         form.append(field('E-mail', email), message, submit);
         form.addEventListener('submit', async (event) => {
             event.preventDefault();
@@ -532,6 +534,7 @@
         const confirm = input('password', 'reset-confirm', '', { autocomplete: 'new-password', required: true, minlength: 8, maxlength: 4096, placeholder: 'Repita a nova senha' });
         const message = el('p', { className: 'form-message', role: 'alert', 'aria-live': 'polite' });
         const submit = button('Salvar nova senha', 'button block');
+        submit.type = 'submit';
         form.append(field('Nova senha', password, 'Use pelo menos 8 caracteres.'), field('Confirmar nova senha', confirm), message, submit);
         form.addEventListener('submit', async (event) => {
             event.preventDefault();
@@ -833,6 +836,7 @@
         if (clientSelect) addSelectOptions(clientSelect, options.clients, 'Selecione o cliente');
         const message = el('p', { className: 'form-message', role: 'status', 'aria-live': 'polite' });
         const submit = button('Confirmar agendamento', 'button');
+        submit.type = 'submit';
         const grid = el('div', { className: 'form-grid three' });
         if (clientSelect) grid.append(field('Cliente', clientSelect));
         grid.append(field('Data', dateInput), field('Barbeiro', barberSelect), field('Serviço', serviceSelect), field('Horário disponível', slotSelect), field('Observações', notes));
@@ -989,6 +993,7 @@
         const password = input('password', 'user-password-input', '', { maxlength: 4096, autocomplete: editing ? 'new-password' : 'new-password', minlength: 8, required: !editing, placeholder: editing ? 'Deixe em branco para manter' : 'Mínimo de 8 caracteres' });
         const message = el('p', { className: 'form-message', role: 'alert', 'aria-live': 'polite' });
         const submit = button(editing ? 'Salvar alterações' : `Cadastrar ${role === 'client' ? 'cliente' : 'barbeiro'}`, 'button');
+        submit.type = 'submit';
         form.append(el('h3', { text: editing ? 'Editar cadastro' : `Novo ${role === 'client' ? 'cliente' : 'barbeiro'}` }), el('p', { text: editing ? 'A senha é opcional na edição.' : 'A senha inicial precisa ter no mínimo 8 caracteres.' }), el('div', { className: 'form-grid' }, [field('Nome completo', name), field('E-mail', email), field('Status', status), field('Senha', password, editing ? 'Opcional na edição.' : 'Obrigatória, mínimo de 8 caracteres.')]), message, el('div', { className: 'form-actions' }, [submit, editing ? button('Cancelar edição', 'button secondary', () => { state.editingUser = null; renderApp(); }) : null]));
         form.addEventListener('submit', async (event) => {
             event.preventDefault();
@@ -1077,6 +1082,7 @@
         addSelectOptions(reference, serviceReferences.map(([label, cents]) => ({ id: cents, name: `${label} — ${formatBRL(cents)}` })), 'Usar uma referência de preço (opcional)');
         const message = el('p', { className: 'form-message', role: 'alert', 'aria-live': 'polite' });
         const submit = button(editing ? 'Salvar alterações' : 'Cadastrar serviço', 'button');
+        submit.type = 'submit';
         reference.addEventListener('change', () => { if (reference.value) price.value = formatBRLInput(Number(reference.value)); });
         form.append(el('h3', { text: editing ? 'Editar serviço' : 'Novo serviço' }), el('p', { text: 'A duração é obrigatória e nenhum serviço é criado automaticamente.' }), el('div', { className: 'form-grid' }, [field('Nome', name), field('Duração em minutos', duration, 'Entre 5 e 480 minutos.'), el('div', { className: 'field' }, [el('label', { htmlFor: price.id, text: 'Valor' }), price, el('div', { className: 'price-reference' }, [el('label', { htmlFor: reference.id, text: 'Referência opcional:' }), reference])]), el('div', { className: 'field' }, [el('span', { className: 'field-label', text: 'Disponibilidade' }), el('div', { className: 'checkbox-field' }, [active, el('label', { htmlFor: active.id, text: 'Serviço ativo para agendamento' })])]), field('Descrição', description)]), message, el('div', { className: 'form-actions' }, [submit, editing ? button('Cancelar edição', 'button secondary', () => { state.editingService = null; renderApp(); }) : null]));
         form.addEventListener('submit', async (event) => {
@@ -1112,6 +1118,7 @@
         const confirm = input('password', 'new-password-confirm', '', { autocomplete: 'new-password', required: true, minlength: 8, maxlength: 4096 });
         const message = el('p', { className: 'form-message', role: 'alert', 'aria-live': 'polite' });
         const submit = button('Alterar senha', 'button');
+        submit.type = 'submit';
         passwordForm.append(el('h3', { text: 'Trocar senha' }), el('p', { text: 'A nova senha precisa ter no mínimo 8 caracteres.' }), field('Senha atual', current), field('Nova senha', next), field('Confirmar nova senha', confirm), message, el('div', { className: 'form-actions' }, [submit]));
         passwordForm.addEventListener('submit', async (event) => {
             event.preventDefault();
