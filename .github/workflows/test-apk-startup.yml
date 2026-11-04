@@ -1,0 +1,69 @@
+name: Retestar abertura do APK existente
+
+on:
+  push:
+    branches: [apk/android-app]
+    paths:
+      - '.github/workflows/test-apk-startup.yml'
+      - '.github/scripts/android-startup-retest.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  startup:
+    name: Verificar APK existente sem recompilar
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - name: Baixar o mesmo APK candidato
+        uses: actions/download-artifact@v4
+        with:
+          name: BarberShop-SistemasHP-Candidato-v2
+          path: build-artifacts
+          run-id: 41859865106
+          github-token: ${{ github.token }}
+      - name: Liberar disco dos toolchains não utilizados
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/ghc "$ANDROID_HOME/ndk"
+          df -h /
+      - name: Ativar KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Abrir APK no Android de testes otimizado
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          target: aosp_atd
+          arch: x86_64
+          ram-size: 2048M
+          disk-size: 2048M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          working-directory: mobile
+          script: bash ../.github/scripts/android-startup-retest.sh ../build-artifacts/BarberShop-SistemasHP-Teste-v2.apk
+      - name: Conferir integridade do mesmo arquivo
+        run: cd ../build-artifacts && sha256sum -c SHA256SUMS.txt
+      - name: Disponibilizar APK após aprovação do teste
+        uses: actions/upload-artifact@v4
+        with:
+          name: BarberShop-SistemasHP-APK-Teste
+          path: build-artifacts/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Guardar diagnósticos
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-startup-diagnostics
+          path: build-artifacts/startup-check/
+          if-no-files-found: ignore
+          retention-days: 7
