@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { HapticTab } from "@/components/haptic-tab";
 import { BARBER_COLORS } from "@/components/barber/ui";
 import { useBarber } from "@/lib/barber/context";
+import { tabAccessRedirect } from "@/lib/barber/navigation";
 
 function Icon({ name, color, size }: { name: React.ComponentProps<typeof Feather>["name"]; color: React.ComponentProps<typeof Feather>["color"]; size: number }) {
   return <Feather name={name} color={color} size={size} />;
@@ -22,12 +23,10 @@ export default function TabLayout() {
   const isStaff = user?.role === "barber" || user?.role === "admin";
   const isAdmin = user?.role === "admin";
   const route = segments[segments.length - 1];
-  const clientRoute = route === "booking" || route === "history";
-  const staffRoute = route === "agenda";
-  const adminRoute = route === "clients" || route === "services";
+  const redirect = tabAccessRedirect(route, user?.role ?? null, authReady);
 
-  if (authReady && (!user || (clientRoute && !isClient) || (staffRoute && !isStaff) || (adminRoute && !isAdmin))) {
-    return <Redirect href="/" />;
+  if (redirect) {
+    return <Redirect href={redirect} />;
   }
 
   return (

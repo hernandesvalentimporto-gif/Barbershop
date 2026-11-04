@@ -1,11 +1,11 @@
 import "@/global.css";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Stack } from "expo-router";
+import { Stack, type ErrorBoundaryProps } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "react-native-reanimated";
-import { Platform } from "react-native";
+import { Platform, Pressable, Text, View } from "react-native";
 import "@/lib/_core/nativewind-pressable";
 import { ThemeProvider } from "@/lib/theme-provider";
 import {
@@ -26,6 +26,18 @@ const DEFAULT_WEB_FRAME: Rect = { x: 0, y: 0, width: 0, height: 0 };
 export const unstable_settings = {
   anchor: "(tabs)",
 };
+
+export function ErrorBoundary({ retry }: ErrorBoundaryProps) {
+  return (
+    <View style={{ flex: 1, justifyContent: "center", padding: 28, gap: 18, backgroundColor: "#080808" }}>
+      <Text style={{ color: "#E7B94E", fontSize: 24, fontWeight: "700" }}>Não foi possível abrir o aplicativo</Text>
+      <Text style={{ color: "#FFFFFF", fontSize: 16 }}>Tente novamente. Se esta mensagem voltar, envie uma captura para corrigirmos a inicialização.</Text>
+      <Pressable accessibilityRole="button" onPress={retry} style={{ minHeight: 48, backgroundColor: "#E7B94E", borderRadius: 12, justifyContent: "center", alignItems: "center" }}>
+        <Text style={{ color: "#080808", fontWeight: "700" }}>Tentar novamente</Text>
+      </Pressable>
+    </View>
+  );
+}
 
 export default function RootLayout() {
   const initialInsets = initialWindowMetrics?.insets ?? DEFAULT_WEB_INSETS;

@@ -8,7 +8,7 @@ const scheme = "manus054228665129522";
 const config: ExpoConfig & { logoUrl: string } = {
   name: "Barber Shop Sistemas HP",
   slug: "barberhp",
-  version: "1.0.0",
+  version: "1.0.1",
   logoUrl: "https://files.manuscdn.com/user_upload_by_module/session_file/310419663030234316/oEqQNEVtWoigIZhQ.png",
   orientation: "portrait",
   icon: "./assets/images/icon.png",
@@ -28,7 +28,7 @@ const config: ExpoConfig & { logoUrl: string } = {
   },
   android: {
     package: bundleId,
-    versionCode: 1,
+    versionCode: 2,
     adaptiveIcon: {
       backgroundColor: "#080808",
       foregroundImage: "./assets/images/android-icon-foreground.png",

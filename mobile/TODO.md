@@ -2,7 +2,7 @@
 
 Referência mais recente do usuário: logo original Barber Shop Sistemas HP, preto #080808 e dourado #E7B94E, cartões grafite e texto branco. Esta referência substitui Agenda Cobalto. Interface em português brasileiro. Estoque e financeiro da imagem são apenas referência visual, fora do escopo funcional aprovado.
 
-- [ ] Aplicativo Android compilável com geração de APK instalável. Preservar os identificadores do projeto; não confundir Preview com APK. Fonte e configuração prontas; o arquivo APK ainda depende da build oficial no painel Manus.
+- [x] Aplicativo Android compilável com geração de APK instalável. Preservar os identificadores do projeto; não confundir Preview com APK. APK de testes ARM64 gerado pelo GitHub Actions, execução 41845806089 concluída com sucesso; assinatura verificada e SHA256 confirmado. Arquivo BarberShop-SistemasHP-Teste.apk. O painel Manus falhou ao abrir Build e foi usada compilação remota com a mesma fonte Expo. Não publicado em lojas e ainda não testado em aparelho físico.
 - [x] Login integrado à API existente, com acesso conforme o perfil de cliente, barbeiro ou administrador. Guardar token no armazenamento seguro nativo; não incluir credenciais do servidor no aplicativo. Implementação revisada e testes de sessão aprovados; sem teste em dispositivo com credenciais reais.
 - [x] Agendamento para clientes, incluindo consulta de serviços, barbeiros, datas e horários disponíveis. Confirmar no servidor; informar conflitos e erros de rede sem criar reservas fictícias. Slots associados à seleção atual e respostas antigas descartadas.
 - [x] Histórico do cliente com visualização dos agendamentos anteriores e atuais.

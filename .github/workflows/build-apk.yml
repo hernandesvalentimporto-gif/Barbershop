@@ -17,9 +17,9 @@ concurrency:
 
 jobs:
   apk:
-    name: Compilar APK para testes (sem publicar)
+    name: Compilar e testar abertura do APK
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     defaults:
       run:
         working-directory: mobile
@@ -43,6 +43,8 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - name: Cache Gradle
+        uses: gradle/actions/setup-gradle@v5
       - name: Configurar Android SDK
         run: |
           SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | sort | tail -n 1)"
@@ -51,7 +53,7 @@ jobs:
           yes | "$SDKMANAGER" --licenses > /dev/null || true
       - name: Instalar dependências sem alterar lockfile
         run: pnpm install --frozen-lockfile --prod=false
-      - name: Verificar TypeScript e testes
+      - name: Verificar TypeScript e regressão de abertura
         run: |
           pnpm check
           pnpm test
@@ -59,26 +61,44 @@ jobs:
         run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.1.12297006'
       - name: Preparar projeto Android com Expo
         run: pnpm exec expo prebuild --platform android --no-install
-      - name: Compilar APK com JavaScript embutido
+      - name: Compilar APK ARM64 e x86_64 com JavaScript embutido
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon --max-workers=2 -PreactNativeArchitectures=arm64-v8a -Dorg.gradle.jvmargs='-Xmx5g -XX:MaxMetaspaceSize=1g' --stacktrace
+          ./gradlew assembleRelease --no-daemon --max-workers=2 -PreactNativeArchitectures=arm64-v8a,x86_64 -Dorg.gradle.jvmargs='-Xmx5g -XX:MaxMetaspaceSize=1g' --stacktrace
       - name: Conferir assinatura e guardar APK
         run: |
           mkdir -p ../build-artifacts
-          cp android/app/build/outputs/apk/release/app-release.apk ../build-artifacts/BarberShop-SistemasHP-Teste.apk
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose ../build-artifacts/BarberShop-SistemasHP-Teste.apk
-          (cd ../build-artifacts && sha256sum BarberShop-SistemasHP-Teste.apk > SHA256SUMS.txt)
-          printf '%s\n' 'APK ARM64 para testes, com assinatura de desenvolvimento do template Expo. Não publicado em lojas. Sem assinatura de produção para Google Play. Administração completa depende da implantação aprovada do complemento PHP. Use apenas credenciais da sua barbearia e desinstale builds anteriores se a assinatura for diferente.' > ../build-artifacts/LEIA-ME.txt
-      - name: Disponibilizar APK para download
+          cp android/app/build/outputs/apk/release/app-release.apk ../build-artifacts/BarberShop-SistemasHP-Teste-v2.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose ../build-artifacts/BarberShop-SistemasHP-Teste-v2.apk
+          (cd ../build-artifacts && sha256sum BarberShop-SistemasHP-Teste-v2.apk > SHA256SUMS.txt)
+          printf '%s\n' 'APK de teste 1.0.1, com correção da navegação de entrada. ARM64 e x86_64, assinatura de desenvolvimento Expo. Sem publicação em lojas. Administração completa depende da implantação aprovada do complemento PHP. O teste de abertura em emulador não substitui a validação completa no celular.' > ../build-artifacts/LEIA-ME.txt
+      - name: Ativar aceleração do emulador
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Abrir release e verificar tela de login
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7_pro
+          ram-size: 2048M
+          disk-size: 2048M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          working-directory: mobile
+          script: bash scripts/android-startup-smoke.sh android/app/build/outputs/apk/release/app-release.apk
+      - name: Disponibilizar APK após o teste de abertura
         uses: actions/upload-artifact@v4
         with:
           name: BarberShop-SistemasHP-APK-Teste
           path: build-artifacts/
           if-no-files-found: error
           retention-days: 30
-      - name: Guardar relatórios se houver falha
+      - name: Guardar diagnósticos se houver falha
         if: failure()
         uses: actions/upload-artifact@v4
         with:
@@ -86,5 +106,6 @@ jobs:
           path: |
             mobile/android/build/reports/
             mobile/android/app/build/reports/
+            build-artifacts/startup-check/
           if-no-files-found: ignore
           retention-days: 7
