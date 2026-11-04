@@ -133,13 +133,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$success) {
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
                 PDO::ATTR_EMULATE_PREPARES => false,
             ]);
-            $pdo->beginTransaction();
+            // O MySQL faz commit implícito em CREATE TABLE; a instalação usa
+            // comandos idempotentes e não envolve o schema em uma transação.
             createSchema($pdo, $prefix);
             $stmt = $pdo->prepare("INSERT INTO `{$prefix}users` (`name`, `email`, `password_hash`, `role`) VALUES (?, ?, ?, 'admin') ON DUPLICATE KEY UPDATE `name` = VALUES(`name`), `password_hash` = VALUES(`password_hash`), `role` = 'admin', `status` = 'active'");
             $stmt->execute([$adminName, $adminEmail, password_hash($adminPassword, PASSWORD_DEFAULT)]);
             $shopStmt = $pdo->prepare("INSERT INTO `{$prefix}barbershops` (`name`) SELECT ? WHERE NOT EXISTS (SELECT 1 FROM `{$prefix}barbershops` LIMIT 1)");
             $shopStmt->execute([$shopName !== '' ? $shopName : 'Barber Shop Sistemas HP']);
-            $pdo->commit();
 
             writeConfig($configFile, [
                 'app' => [
