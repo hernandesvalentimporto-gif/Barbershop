@@ -72,6 +72,21 @@ function ensureSessions(PDO $pdo, string $prefix): void
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 }
 
+function ensureSyncQueue(PDO $pdo, string $prefix): void
+{
+    $pdo->exec("CREATE TABLE IF NOT EXISTS `{$prefix}sync_queue` (
+        `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+        `device_id` VARCHAR(120) NOT NULL,
+        `entity` VARCHAR(80) NOT NULL,
+        `entity_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+        `operation` ENUM('create','update','delete') NOT NULL,
+        `payload` JSON NOT NULL,
+        `status` ENUM('pending','processed','conflict') NOT NULL DEFAULT 'pending',
+        `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (`id`), KEY `idx_{$prefix}sync_status` (`status`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+}
+
 function authenticatedUser(PDO $pdo, string $prefix): array
 {
     $token = bearerToken();
@@ -120,6 +135,25 @@ if ($action === 'logout' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $user = authenticatedUser($pdo, $prefix);
 if ($action === 'me') jsonResponse(['ok' => true, 'user' => $user]);
+
+if ($action === 'sync' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $data = body();
+    $changes = is_array($data['changes'] ?? null) ? array_slice($data['changes'], 0, 50) : [];
+    $deviceId = trim((string)($data['device_id'] ?? ''));
+    if ($deviceId === '' || strlen($deviceId) > 120 || !$changes) jsonResponse(['ok' => false, 'error' => 'invalid_sync_payload'], 422);
+    ensureSyncQueue($pdo, $prefix);
+    $stmt = $pdo->prepare("INSERT INTO `{$prefix}sync_queue` (`device_id`, `entity`, `entity_id`, `operation`, `payload`) VALUES (?, ?, ?, ?, ?)");
+    $accepted = [];
+    foreach ($changes as $change) {
+        $entity = (string)($change['entity'] ?? '');
+        $operation = (string)($change['operation'] ?? '');
+        $payload = $change['payload'] ?? null;
+        if (!preg_match('/^[A-Za-z0-9._-]{1,80}$/', $entity) || !in_array($operation, ['create', 'update', 'delete'], true) || !is_array($payload)) continue;
+        $stmt->execute([$deviceId, $entity, (int)($change['entity_id'] ?? 0), $operation, json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)]);
+        $accepted[] = ['client_id' => (string)($change['client_id'] ?? ''), 'server_id' => (int)$pdo->lastInsertId()];
+    }
+    jsonResponse(['ok' => true, 'accepted' => $accepted, 'queued' => count($accepted)]);
+}
 
 if ($action === 'summary') {
     $response = ['ok' => true, 'user' => $user, 'data' => []];
