@@ -183,6 +183,12 @@ if ($action === 'appointment_cancel' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     jsonResponse(['ok' => true, 'appointment_id' => $appointmentId, 'status' => 'cancelled']);
 }
 
+if ($action === 'catalog' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    $services = $pdo->query("SELECT id, name, duration_minutes, price_cents FROM `{$prefix}services` WHERE active = 1 ORDER BY name ASC")->fetchAll();
+    $barbers = $pdo->query("SELECT id, name FROM `{$prefix}users` WHERE role = 'barber' AND status = 'active' ORDER BY name ASC")->fetchAll();
+    jsonResponse(['ok' => true, 'services' => $services, 'barbers' => $barbers]);
+}
+
 if ($action === 'summary') {
     $response = ['ok' => true, 'user' => $user, 'data' => []];
     if ($user['role'] === 'admin') {
