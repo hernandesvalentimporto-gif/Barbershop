@@ -1,0 +1,86 @@
+name: Gerar APK Android de teste
+
+on:
+  push:
+    branches: [apk/android-app]
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/build-apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  apk:
+    name: Compilar APK para testes (sem publicar)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: mobile
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      NODE_OPTIONS: --max-old-space-size=6144
+    steps:
+      - name: Baixar a fonte aprovada da branch
+        uses: actions/checkout@v4
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Configurar pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - name: Configurar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Configurar Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Instalar dependências sem alterar lockfile
+        run: pnpm install --frozen-lockfile --prod=false
+      - name: Verificar TypeScript e testes
+        run: |
+          pnpm check
+          pnpm test
+      - name: Instalar SDK Android e NDK compatíveis
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.1.12297006'
+      - name: Preparar projeto Android com Expo
+        run: pnpm exec expo prebuild --platform android --no-install
+      - name: Compilar APK com JavaScript embutido
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --max-workers=2 -PreactNativeArchitectures=arm64-v8a -Dorg.gradle.jvmargs='-Xmx5g -XX:MaxMetaspaceSize=1g' --stacktrace
+      - name: Conferir assinatura e guardar APK
+        run: |
+          mkdir -p ../build-artifacts
+          cp android/app/build/outputs/apk/release/app-release.apk ../build-artifacts/BarberShop-SistemasHP-Teste.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose ../build-artifacts/BarberShop-SistemasHP-Teste.apk
+          (cd ../build-artifacts && sha256sum BarberShop-SistemasHP-Teste.apk > SHA256SUMS.txt)
+          printf '%s\n' 'APK ARM64 para testes, com assinatura de desenvolvimento do template Expo. Não publicado em lojas. Sem assinatura de produção para Google Play. Administração completa depende da implantação aprovada do complemento PHP. Use apenas credenciais da sua barbearia e desinstale builds anteriores se a assinatura for diferente.' > ../build-artifacts/LEIA-ME.txt
+      - name: Disponibilizar APK para download
+        uses: actions/upload-artifact@v4
+        with:
+          name: BarberShop-SistemasHP-APK-Teste
+          path: build-artifacts/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Guardar relatórios se houver falha
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-build-diagnostics
+          path: |
+            mobile/android/build/reports/
+            mobile/android/app/build/reports/
+          if-no-files-found: ignore
+          retention-days: 7
