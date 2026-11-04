@@ -1,0 +1,192 @@
+import Feather from "@expo/vector-icons/Feather";
+import React, { useEffect, useState } from "react";
+import { Pressable, Text, View } from "react-native";
+
+import { api } from "@/lib/barber/api";
+import { useBarber } from "@/lib/barber/context";
+import { WEB_STORAGE_WARNING } from "@/lib/barber/storage";
+import type { Appointment, SummaryResponse } from "@/lib/barber/types";
+import { formatDateTime } from "@/lib/barber/utils";
+import {
+  BARBER_COLORS,
+  BrandHeader,
+  Button,
+  Card,
+  ErrorState,
+  Field,
+  Header,
+  LoadingState,
+  Notice,
+  Screen,
+  StatusBadge,
+  styles,
+} from "@/components/barber/ui";
+
+function LoginScreen() {
+  const { login, busy, authError, clearAuthError } = useBarber();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [validation, setValidation] = useState<string | null>(null);
+
+  async function submit() {
+    setValidation(null);
+    clearAuthError();
+    if (!email.trim() || !email.includes("@")) {
+      setValidation("Informe um e-mail válido.");
+      return;
+    }
+    if (!password) {
+      setValidation("Informe sua senha.");
+      return;
+    }
+    try {
+      await login(email, password);
+    } catch {
+      // The provider exposes the server/network message below the form.
+    }
+  }
+
+  return (
+    <Screen keyboard contentStyle={{ justifyContent: "center" }}>
+      <BrandHeader subtitle="Sua agenda, do seu jeito" />
+      <View style={{ gap: 18 }}>
+        <View style={{ gap: 6 }}>
+          <Text style={styles.title}>Entrar</Text>
+          <Text style={styles.subtitle}>Acesse sua conta para continuar.</Text>
+        </View>
+        <Field
+          label="E-mail"
+          value={email}
+          onChangeText={setEmail}
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="email-address"
+          textContentType="username"
+          placeholder="voce@email.com"
+          onFocus={clearAuthError}
+        />
+        <View style={{ gap: 7 }}>
+          <Text style={styles.label}>Senha</Text>
+          <View style={{ position: "relative", justifyContent: "center" }}>
+            <Field
+              label=""
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry={!showPassword}
+              textContentType="password"
+              placeholder="Sua senha"
+              onSubmitEditing={submit}
+              style={{ paddingRight: 48 }}
+            />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={showPassword ? "Ocultar senha" : "Mostrar senha"}
+              onPress={() => setShowPassword((current) => !current)}
+              style={{ position: "absolute", right: 12, top: 12, minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center" }}
+            >
+              <Feather name={showPassword ? "eye-off" : "eye"} size={20} color={BARBER_COLORS.gold} />
+            </Pressable>
+          </View>
+        </View>
+        {validation || authError ? <Notice tone="danger">{validation ?? authError}</Notice> : null}
+        <Button onPress={submit} loading={busy} icon="log-in">Entrar</Button>
+        <Notice>{WEB_STORAGE_WARNING}</Notice>
+      </View>
+    </Screen>
+  );
+}
+
+function UpcomingCard({ appointment }: { appointment: Appointment }) {
+  return (
+    <Card>
+      <View style={styles.row}>
+        <Text style={styles.sectionTitle}>Próximo atendimento</Text>
+        <StatusBadge status={appointment.status} />
+      </View>
+      <Text style={styles.body}>{formatDateTime(appointment.starts_at)}</Text>
+      {appointment.service_name ? <Text style={styles.muted}>{appointment.service_name}</Text> : null}
+      {appointment.barber_name ? <Text style={styles.muted}>Com {appointment.barber_name}</Text> : null}
+    </Card>
+  );
+}
+
+function HomeScreen() {
+  const { user } = useBarber();
+  const [summary, setSummary] = useState<SummaryResponse["data"] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  async function load() {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await api.summary();
+      setSummary(result.data);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Não foi possível carregar o resumo.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    const timer = setTimeout(() => void load(), 0);
+    return () => clearTimeout(timer);
+  }, [user?.id]);
+
+  if (!user) return null;
+  const greeting = user.name ? `Olá, ${user.name.split(" ")[0]}` : "Olá";
+  const isClient = user.role === "client";
+  const isBarber = user.role === "barber";
+  const upcoming = (summary as any)?.upcoming;
+  const clientUpcoming = isClient ? (Array.isArray(upcoming) ? upcoming[0] : upcoming) : null;
+  const barberTodayCount = isBarber && typeof (summary as any)?.today_appointments === "number" ? (summary as any).today_appointments : null;
+  const barberAppointments = isBarber && Array.isArray((summary as any)?.appointments) ? (summary as any).appointments : null;
+
+  return (
+    <Screen>
+      <Header title={greeting} subtitle={isClient ? "Pronto para cuidar do visual?" : isBarber ? "Aqui está sua agenda de hoje." : "Visão geral da operação."} />
+      {loading ? <LoadingState label="Carregando seu resumo..." /> : null}
+      {!loading && error ? <ErrorState message={error} onRetry={() => void load()} /> : null}
+      {!loading && !error && isClient ? (
+        clientUpcoming ? <UpcomingCard appointment={clientUpcoming} /> : <Card><Text style={styles.sectionTitle}>Nenhum próximo atendimento</Text><Text style={styles.muted}>Quando você tiver um agendamento, ele aparecerá aqui.</Text></Card>
+      ) : null}
+      {!loading && !error && isBarber ? (
+        <Card>
+          <Text style={styles.sectionTitle}>Atendimentos de hoje</Text>
+          {barberTodayCount !== null ? <Text style={styles.gold}>{barberTodayCount} atendimento(s) pendente(s) ou confirmado(s)</Text> : null}
+          {Array.isArray(barberAppointments) ? (
+            barberAppointments.length ? barberAppointments.slice(0, 5).map((appointment: Appointment) => <View key={appointment.id} style={styles.row}><View style={{ flex: 1, gap: 3 }}><Text style={styles.body}>{appointment.client_name ?? "Cliente"}</Text><Text style={styles.muted}>{formatDateTime(appointment.starts_at)}{appointment.service_name ? ` · ${appointment.service_name}` : ""}</Text></View><StatusBadge status={appointment.status} /></View>) : <Text style={styles.muted}>Nenhum atendimento informado para hoje.</Text>
+          ) : <Text style={styles.muted}>O servidor não retornou a agenda de hoje.</Text>}
+        </Card>
+      ) : null}
+      {!loading && !error && user.role === "admin" ? (
+        <Card>
+          <Text style={styles.sectionTitle}>Resumo administrativo</Text>
+          <Text style={styles.muted}>Os números abaixo são exibidos somente quando retornados pelo servidor.</Text>
+          <View style={styles.wrap}>
+            {typeof (summary as any)?.users === "number" ? <Metric label="Usuários" value={String((summary as any).users)} /> : null}
+            {typeof (summary as any)?.barbers === "number" ? <Metric label="Barbeiros" value={String((summary as any).barbers)} /> : null}
+            {typeof (summary as any)?.appointments === "number" ? <Metric label="Atendimentos" value={String((summary as any).appointments)} /> : null}
+          </View>
+        </Card>
+      ) : null}
+      <Card>
+        <Text style={styles.sectionTitle}>Sessão ativa</Text>
+        <Text style={styles.muted}>{user.email}</Text>
+        <Text style={styles.gold}>{user.role === "client" ? "Cliente" : user.role === "barber" ? "Barbeiro" : "Administrador"}</Text>
+      </Card>
+    </Screen>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return <View style={{ minWidth: 90, flex: 1, gap: 3 }}><Text style={styles.title}>{value}</Text><Text style={styles.muted}>{label}</Text></View>;
+}
+
+export default function IndexScreen() {
+  const { authReady, user } = useBarber();
+  if (!authReady) return <Screen scroll={false}><LoadingState label="Verificando sessão..." /></Screen>;
+  return user ? <HomeScreen /> : <LoginScreen />;
+}

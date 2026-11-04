@@ -31,3 +31,6 @@ jobs:
             **/.ftp-deploy-sync-state.json
             **/README*.md
             **/config.example.php
+            **/mobile/**
+            **/tests/**
+            **/build-artifacts/**
