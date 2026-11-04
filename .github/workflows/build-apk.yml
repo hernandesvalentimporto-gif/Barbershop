@@ -17,9 +17,9 @@ concurrency:
 
 jobs:
   apk:
-    name: Compilar e testar abertura do APK
+    name: Compilar APK corrigido
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 100
     defaults:
       run:
         working-directory: mobile
@@ -66,13 +66,51 @@ jobs:
           cd android
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon --max-workers=2 -PreactNativeArchitectures=arm64-v8a,x86_64 -Dorg.gradle.jvmargs='-Xmx5g -XX:MaxMetaspaceSize=1g' --stacktrace
-      - name: Conferir assinatura e guardar APK
+      - name: Conferir assinatura e guardar candidato
         run: |
           mkdir -p ../build-artifacts
           cp android/app/build/outputs/apk/release/app-release.apk ../build-artifacts/BarberShop-SistemasHP-Teste-v2.apk
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose ../build-artifacts/BarberShop-SistemasHP-Teste-v2.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs ../build-artifacts/BarberShop-SistemasHP-Teste-v2.apk
           (cd ../build-artifacts && sha256sum BarberShop-SistemasHP-Teste-v2.apk > SHA256SUMS.txt)
           printf '%s\n' 'APK de teste 1.0.1, com correção da navegação de entrada. ARM64 e x86_64, assinatura de desenvolvimento Expo. Sem publicação em lojas. Administração completa depende da implantação aprovada do complemento PHP. O teste de abertura em emulador não substitui a validação completa no celular.' > ../build-artifacts/LEIA-ME.txt
+      - name: Transferir candidato para a máquina de testes
+        uses: actions/upload-artifact@v4
+        with:
+          name: BarberShop-SistemasHP-Candidato-v2
+          path: build-artifacts/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Guardar erros de compilação
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-build-diagnostics
+          path: |
+            mobile/android/build/reports/
+            mobile/android/app/build/reports/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  startup:
+    name: Testar abertura em Android antes de liberar
+    needs: apk
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - name: Baixar somente a fonte do teste
+        uses: actions/checkout@v4
+      - name: Baixar o APK candidato
+        uses: actions/download-artifact@v4
+        with:
+          name: BarberShop-SistemasHP-Candidato-v2
+          path: build-artifacts
+      - name: Liberar disco dos toolchains que este teste não utiliza
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/ghc "$ANDROID_HOME/ndk"
+          df -h /
       - name: Ativar aceleração do emulador
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -90,7 +128,7 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
           working-directory: mobile
-          script: bash scripts/android-startup-smoke.sh android/app/build/outputs/apk/release/app-release.apk
+          script: bash scripts/android-startup-smoke.sh ../build-artifacts/BarberShop-SistemasHP-Teste-v2.apk
       - name: Disponibilizar APK após o teste de abertura
         uses: actions/upload-artifact@v4
         with:
@@ -98,14 +136,11 @@ jobs:
           path: build-artifacts/
           if-no-files-found: error
           retention-days: 30
-      - name: Guardar diagnósticos se houver falha
+      - name: Guardar diagnósticos de abertura
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: android-build-diagnostics
-          path: |
-            mobile/android/build/reports/
-            mobile/android/app/build/reports/
-            build-artifacts/startup-check/
+          name: android-startup-diagnostics
+          path: build-artifacts/startup-check/
           if-no-files-found: ignore
           retention-days: 7
