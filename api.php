@@ -234,4 +234,10 @@ if ($action === 'summary') {
     jsonResponse($response);
 }
 
+if ($action === 'history' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    $stmt = $pdo->prepare("SELECT a.id, a.starts_at, a.ends_at, a.status, u.name AS barber_name, s.name AS service_name FROM `{$prefix}appointments` a LEFT JOIN `{$prefix}users` u ON u.id = a.barber_id LEFT JOIN `{$prefix}services` s ON s.id = a.service_id WHERE a.client_id = ? ORDER BY a.starts_at DESC LIMIT 50");
+    $stmt->execute([(int)$user['id']]);
+    jsonResponse(['ok' => true, 'appointments' => $stmt->fetchAll()]);
+}
+
 jsonResponse(['ok' => false, 'error' => 'not_found'], 404);
