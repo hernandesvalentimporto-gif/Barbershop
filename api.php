@@ -189,6 +189,30 @@ if ($action === 'catalog' && $_SERVER['REQUEST_METHOD'] === 'GET') {
     jsonResponse(['ok' => true, 'services' => $services, 'barbers' => $barbers]);
 }
 
+if ($action === 'availability' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    $date = (string)($_GET['date'] ?? '');
+    $barberId = (int)($_GET['barber_id'] ?? 0);
+    $serviceId = (int)($_GET['service_id'] ?? 0);
+    $day = DateTime::createFromFormat('Y-m-d', $date);
+    if (!$day || $day->format('Y-m-d') !== $date || $barberId < 1 || $serviceId < 1) jsonResponse(['ok' => false, 'error' => 'invalid_availability'], 422);
+    $service = $pdo->prepare("SELECT duration_minutes FROM `{$prefix}services` WHERE id = ? AND active = 1 LIMIT 1");
+    $service->execute([$serviceId]);
+    $duration = (int)$service->fetchColumn();
+    if ($duration < 1) jsonResponse(['ok' => false, 'error' => 'service_not_found'], 404);
+    $appointments = $pdo->prepare("SELECT starts_at, ends_at FROM `{$prefix}appointments` WHERE barber_id = ? AND status IN ('pending','confirmed') AND starts_at < DATE_ADD(?, INTERVAL 1 DAY) AND ends_at > ?");
+    $appointments->execute([$barberId, $date, $date]);
+    $busy = $appointments->fetchAll();
+    $slots = [];
+    for ($minutes = 9 * 60; $minutes <= 18 * 60 - $duration; $minutes += 30) {
+        $start = DateTime::createFromFormat('Y-m-d H:i', sprintf('%s %02d:%02d', $date, intdiv($minutes, 60), $minutes % 60));
+        $end = (clone $start)->modify("+{$duration} minutes");
+        $blocked = false;
+        foreach ($busy as $item) if ($start->format('Y-m-d H:i:s') < $item['ends_at'] && $end->format('Y-m-d H:i:s') > $item['starts_at']) { $blocked = true; break; }
+        if (!$blocked) $slots[] = ['starts_at' => $start->format('Y-m-d H:i:s'), 'ends_at' => $end->format('Y-m-d H:i:s')];
+    }
+    jsonResponse(['ok' => true, 'slots' => $slots]);
+}
+
 if ($action === 'summary') {
     $response = ['ok' => true, 'user' => $user, 'data' => []];
     if ($user['role'] === 'admin') {
