@@ -44,7 +44,11 @@ jobs:
           distribution: temurin
           java-version: '17'
       - name: Configurar Android SDK
-        uses: android-actions/setup-android@v3
+        run: |
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | sort | tail -n 1)"
+          test -n "$SDKMANAGER"
+          echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
       - name: Instalar dependências sem alterar lockfile
         run: pnpm install --frozen-lockfile --prod=false
       - name: Verificar TypeScript e testes
