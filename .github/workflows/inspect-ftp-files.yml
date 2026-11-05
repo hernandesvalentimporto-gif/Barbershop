@@ -1,0 +1,34 @@
+name: Comparar arquivos FTP
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    env:
+      FTP_HOST: ftp.sistemashp1.hospedagemdesites.ws
+      FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+      FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+    steps:
+      - name: Baixar index.php dos caminhos candidatos
+        shell: bash
+        run: |
+          set -u
+          for path in \
+            public_html/barbershop/index.php \
+            barbershop/index.php \
+            public_html/controle_pessoal/index.php \
+            controle_pessoal/index.php; do
+            out="/tmp/$(echo "$path" | tr '/' '_')"
+            echo "===== $path ====="
+            if curl --fail --show-error --silent --ftp-pasv --user "$FTP_USERNAME:$FTP_PASSWORD" --max-time 30 "ftp://$FTP_HOST/$path" -o "$out"; then
+              sha256sum "$out"
+              head -c 120 "$out" | tr '\n' ' '; echo
+            else
+              echo "FILE_NOT_READABLE"
+            fi
+          done
