@@ -23,12 +23,12 @@ jobs:
       - name: Publicar na pasta barbershop
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
-          server: ${{ secrets.FTP_SERVER || secrets.FTP_HOST }}
+          server: ftp.sistemashp1.hospedagemdesites.ws
           username: ${{ secrets.FTP_USERNAME || secrets.FTP_USER }}
           password: ${{ secrets.FTP_PASSWORD }}
           server-dir: /public_html/barbershop/
           protocol: ftp
-          state-name: .ftp-deploy-sync-state.json
+          state-name: .barbershop-ftp-deploy-sync-state.json
           exclude: |
             **/.git*/**
             **/.github/**
