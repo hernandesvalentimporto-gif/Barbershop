@@ -64,6 +64,8 @@
         invalid_plan: 'Confira nome, código, preço, periodicidade e teste do plano.',
         plan_code_exists: 'Já existe um plano com esse código.',
         invalid_platform_customer: 'Confira os dados da barbearia, do responsável e uma senha com pelo menos 8 caracteres.',
+        invalid_platform_customer_update: 'Confira o nome, o contato, o telefone, o endereço e o e-mail do responsável.',
+        platform_owner_not_found: 'Não foi encontrada uma conta de responsável para editar nesta barbearia.',
         invalid_checkout_request: 'Informe a barbearia, o plano e um e-mail válido para o checkout.',
         barbershop_not_found: 'Barbearia não encontrada.',
         payment_not_configured: 'O pagamento ainda não está configurado no servidor.',
@@ -100,6 +102,7 @@
         platformSection: 'overview',
         platformCustomerFilter: 'all',
         platformDetailId: null,
+        platformEditingShop: false,
         renderId: 0,
         toastTimer: null
     };
@@ -549,8 +552,13 @@
             message.className = 'form-message';
             try {
                 const result = await api('forgot_password', { method: 'POST', body: { email: email.value.trim() } });
-                message.className = 'form-message success';
-                message.textContent = result.message || 'Se houver uma conta, as instruções foram enviadas.';
+                if (result.email_enabled === false) {
+                    message.className = 'form-message error';
+                    message.textContent = 'A recuperação por e-mail está temporariamente indisponível. Avise o administrador da plataforma.';
+                } else {
+                    message.className = 'form-message success';
+                    message.textContent = result.message || 'Se houver uma conta, as instruções foram enviadas.';
+                }
             } catch (error) {
                 message.className = 'form-message error';
                 message.textContent = friendlyError(error);
@@ -775,7 +783,8 @@
                         el('div', { className: 'record-main' }, [
                             el('strong', { text: customer.name }),
                             el('span', { text: `${customer.phone || 'Sem telefone'} • ${customer.address || 'Endereço não informado'}` }),
-                            el('span', { text: `${customer.owner_name || 'Responsável não cadastrado'} • ${customer.owner_email || 'Sem e-mail do responsável'}` }),
+                            el('span', { text: `Responsável: ${customer.owner_name || 'Não cadastrado'}` }),
+                            el('span', { className: 'record-detail email-detail', text: `E-mail de acesso: ${customer.owner_email || 'Não cadastrado'}` }),
                             el('span', { text: `${customer.plan_name || 'Sem plano'} • ${period}` }),
                             el('span', { className: 'record-detail', text: `${Number(customer.active_barbers || 0)} barbeiro(s) ativo(s) • ${clientCounts}` })
                         ]),
@@ -866,7 +875,8 @@
                     list.append(el('article', { className: 'record-row' }, [
                         el('div', { className: 'record-main' }, [
                             el('strong', { text: shop.name }),
-                            el('span', { text: `${shop.owner_name || 'Responsável não cadastrado'} • ${shop.owner_email || 'Sem e-mail'}` }),
+                            el('span', { text: `Responsável: ${shop.owner_name || 'Não cadastrado'}` }),
+                            el('span', { className: 'record-detail email-detail', text: `E-mail de acesso: ${shop.owner_email || 'Não cadastrado'}` }),
                             el('span', { className: 'record-detail', text: `${statusText} • ${amount}` }),
                             el('span', { text: deadline ? `${shop.subscription_status === 'trialing' ? 'Fim do teste' : 'Próximo vencimento'}: ${formatUtcDateTime(deadline)}` : 'Sem vencimento informado' })
                         ]),
@@ -1004,9 +1014,55 @@
             detailSection.append(
                 el('h2', { text: shop.name || 'Barbearia' }),
                 el('div', { className: 'record-secondary' }, [subscriptionPill(shop.subscription_status), el('span', { text: shop.plan_name || 'Sem plano' })]),
-                el('div', { className: 'profile-details shop-detail-grid' }, [
+                button(state.platformEditingShop ? 'Cancelar edição' : 'Editar dados da barbearia', 'button secondary', () => {
+                    state.platformEditingShop = !state.platformEditingShop;
+                    renderApp();
+                })
+            );
+            if (state.platformEditingShop) {
+                const editForm = el('form', { className: 'form-card', novalidate: true, autocomplete: 'off' });
+                const editShopName = input('text', 'platform-edit-shop-name', shop.name || '', { required: true, maxlength: 180 });
+                const editPhone = input('tel', 'platform-edit-shop-phone', shop.phone || '', { maxlength: 40 });
+                const editAddress = input('text', 'platform-edit-shop-address', shop.address || '', { maxlength: 255 });
+                const editOwnerName = input('text', 'platform-edit-owner-name', shop.owner_name || '', { required: true, maxlength: 160 });
+                const editOwnerEmail = input('email', 'platform-edit-owner-email', shop.owner_email || '', { required: true, maxlength: 190 });
+                const editMessage = el('p', { className: 'form-message', role: 'alert', 'aria-live': 'polite' });
+                const editSubmit = button('Salvar alterações', 'button');
+                editSubmit.type = 'submit';
+                editForm.append(
+                    el('h3', { text: 'Editar barbearia e responsável' }),
+                    el('p', { className: 'section-description', text: 'Alterar o e-mail também altera o e-mail de acesso do responsável. Esta edição não altera a senha.' }),
+                    el('div', { className: 'form-grid' }, [
+                        field('Nome da barbearia', editShopName), field('Telefone', editPhone), field('Endereço', editAddress),
+                        field('Nome do responsável', editOwnerName), field('E-mail de acesso do responsável', editOwnerEmail)
+                    ]),
+                    editMessage,
+                    el('div', { className: 'form-actions' }, [editSubmit])
+                );
+                editForm.addEventListener('submit', async (event) => {
+                    event.preventDefault();
+                    if (!editForm.reportValidity() || editSubmit.disabled) return;
+                    setButtonBusy(editSubmit, true, 'Salvando...');
+                    editMessage.className = 'form-message';
+                    try {
+                        await api('platform_customer_update', { method: 'POST', body: {
+                            barbershop_id: Number(shop.id), name: editShopName.value.trim(), phone: editPhone.value.trim(),
+                            address: editAddress.value.trim(), owner_name: editOwnerName.value.trim(), owner_email: editOwnerEmail.value.trim()
+                        }});
+                        state.platformEditingShop = false;
+                        editMessage.className = 'form-message success';
+                        editMessage.textContent = 'Dados da barbearia atualizados.';
+                        window.setTimeout(() => renderApp(), 450);
+                    } catch (error) {
+                        editMessage.className = 'form-message error';
+                        editMessage.textContent = friendlyError(error);
+                    } finally { setButtonBusy(editSubmit, false); }
+                });
+                detailSection.append(editForm);
+            } else {
+                detailSection.append(el('div', { className: 'profile-details shop-detail-grid' }, [
                     el('div', {}, [el('span', { text: 'Responsável' }), el('strong', { text: shop.owner_name || 'Não cadastrado' })]),
-                    el('div', {}, [el('span', { text: 'E-mail' }), el('strong', { text: shop.owner_email || 'Não cadastrado' })]),
+                    el('div', { className: 'shop-detail-email' }, [el('span', { text: 'E-mail de acesso do responsável' }), el('strong', { text: shop.owner_email || 'E-mail não cadastrado' })]),
                     el('div', {}, [el('span', { text: 'Telefone' }), el('strong', { text: shop.phone || 'Não informado' })]),
                     el('div', {}, [el('span', { text: 'Endereço' }), el('strong', { text: shop.address || 'Não informado' })]),
                     el('div', {}, [el('span', { text: 'Preço do plano' }), el('strong', { text: amount })]),
@@ -1014,8 +1070,8 @@
                     el('div', {}, [el('span', { text: 'Fim do teste' }), el('strong', { text: formatUtcDateTime(shop.trial_ends_at) })]),
                     el('div', {}, [el('span', { text: 'Fim do período atual' }), el('strong', { text: formatUtcDateTime(shop.current_period_end) })]),
                     el('div', {}, [el('span', { text: 'Tolerância até' }), el('strong', { text: formatUtcDateTime(shop.grace_period_ends_at) })])
-                ])
-            );
+                ]));
+            }
             const users = Array.isArray(detailResult.users) ? detailResult.users : [];
             const userList = el('div', { className: 'record-list' });
             users.forEach((user) => userList.append(el('article', { className: 'record-row' }, [

@@ -8,7 +8,7 @@ Administrador: painel com contagens reais, agenda por data e botão **Novo atend
 
 ## Master: clientes SaaS, financeiro e teste
 
-O administrador master pode abrir o cadastro comercial de cada barbearia e consultar o responsável, contatos, plano, status e contas daquele tenant. A área **Financeiro** lista assinaturas em teste, ativas, inadimplentes e vencidas. O preço exibido é o preço cadastrado do plano, não um saldo de fatura; não há extrato conciliado de pagamentos enquanto os webhooks e a correlação do provedor não forem configurados e validados.
+O administrador master pode abrir e editar o cadastro comercial de cada barbearia: nome e contato comercial, nome e e-mail de acesso do responsável. O e-mail aparece explicitamente na lista e na ficha; alterá-lo invalida as sessões anteriores do responsável e preserva a senha atual. O master também pode consultar o plano, status e contas daquele tenant. A área **Financeiro** lista assinaturas em teste, ativas, inadimplentes e vencidas. O preço exibido é o preço cadastrado do plano, não um saldo de fatura; não há extrato conciliado de pagamentos enquanto os webhooks e a correlação do provedor não forem configurados e validados.
 
 O trial começa no servidor em UTC e termina 30 dias depois. Vencimento não significa aprovação nem pagamento: deve passar para `expired`; a assinatura só vira `active` após confirmação de cobrança do provedor. A aplicação atual registra o vencimento ao consultar o painel master (não é um cron independente) e ainda precisa validar a configuração de pagamento e o bloqueio/leitura para vencidos antes de considerar o ciclo comercial completo.
 
@@ -18,7 +18,7 @@ O trial começa no servidor em UTC e termina 30 dias depois. Vencimento não sig
 
 ## E-mail
 
-O envio real depende de `mail()` e da autorização do remetente na hospedagem. O padrão é `no-reply@` seguido do domínio da URL confiável em `config.php`. Opcionalmente, no arquivo privado de configuração: `mail.from` define o remetente e `mail.enabled=false` desabilita o recurso. A confirmação é genérica para não revelar contas. Um teste do transporte local **não comprova entrega de e-mail de produção**; não afirme que o e-mail chegou sem confirmação.
+O envio real depende de `mail()` e da autorização do remetente na hospedagem. O padrão é `no-reply@` seguido do domínio da URL confiável em `config.php`. Opcionalmente, no arquivo privado de configuração: `mail.from` define o remetente e `mail.enabled=false` desabilita o recurso. A tela de recuperação informa quando o endpoint declara o envio desabilitado; uma resposta aceita do PHP `mail()` ainda não comprova entrega. Verifique também a configuração de saída da hospedagem, SPF/DKIM e spam/quarentena. O transporte de teste local **não comprova entrega de e-mail de produção**.
 
 ## Publicação
 

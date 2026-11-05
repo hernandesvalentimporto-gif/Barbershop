@@ -312,6 +312,66 @@ function webHandlePlatformCustomerDetails(): never
     ], 'users' => $users]);
 }
 
+function webHandlePlatformCustomerUpdate(): never
+{
+    webRequireMethod('POST');
+    $context = webAuthenticatedContext(true);
+    if (!(bool)($context['user']['platform_admin'] ?? false)) {
+        webError('forbidden', 403);
+    }
+    $data = webReadJsonBody();
+    $shopId = filter_var($data['barbershop_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+    $name = is_string($data['name'] ?? null) ? trim($data['name']) : '';
+    $phone = is_string($data['phone'] ?? null) ? trim($data['phone']) : '';
+    $address = is_string($data['address'] ?? null) ? trim($data['address']) : '';
+    $ownerName = is_string($data['owner_name'] ?? null) ? trim($data['owner_name']) : '';
+    $ownerEmail = is_string($data['owner_email'] ?? null) ? strtolower(trim($data['owner_email'])) : '';
+    if ($shopId === false || $name === '' || strlen($name) > 180 || strlen($phone) > 40 || strlen($address) > 255
+        || $ownerName === '' || strlen($ownerName) > 160 || strlen($ownerEmail) > 190
+        || filter_var($ownerEmail, FILTER_VALIDATE_EMAIL) === false) {
+        webError('invalid_platform_customer_update', 422);
+    }
+    $pdo = $context['pdo'];
+    $prefix = $context['prefix'];
+    try {
+        $pdo->beginTransaction();
+        $shopStmt = $pdo->prepare("SELECT id FROM `{$prefix}barbershops` WHERE id = ? LIMIT 1 FOR UPDATE");
+        $shopStmt->execute([$shopId]);
+        if (!$shopStmt->fetch()) {
+            $pdo->rollBack();
+            webError('barbershop_not_found', 404);
+        }
+        $ownerStmt = $pdo->prepare("SELECT id, email FROM `{$prefix}users`
+            WHERE barbershop_id = ? AND role = 'admin' AND platform_admin = 0 ORDER BY id LIMIT 1 FOR UPDATE");
+        $ownerStmt->execute([$shopId]);
+        $owner = $ownerStmt->fetch();
+        if (!is_array($owner)) {
+            $pdo->rollBack();
+            webError('platform_owner_not_found', 409);
+        }
+        $ownerId = (int)$owner['id'];
+        $emailStmt = $pdo->prepare("SELECT id FROM `{$prefix}users` WHERE email = ? AND id <> ? LIMIT 1");
+        $emailStmt->execute([$ownerEmail, $ownerId]);
+        if ($emailStmt->fetch()) {
+            $pdo->rollBack();
+            webError('email_already_exists', 409);
+        }
+        $shopUpdate = $pdo->prepare("UPDATE `{$prefix}barbershops` SET name = ?, phone = ?, address = ? WHERE id = ?");
+        $shopUpdate->execute([$name, $phone !== '' ? $phone : null, $address !== '' ? $address : null, $shopId]);
+        $ownerUpdate = $pdo->prepare("UPDATE `{$prefix}users` SET name = ?, email = ? WHERE id = ? AND barbershop_id = ? AND role = 'admin' AND platform_admin = 0");
+        $ownerUpdate->execute([$ownerName, $ownerEmail, $ownerId, $shopId]);
+        if (strcasecmp((string)$owner['email'], $ownerEmail) !== 0) {
+            $revoke = $pdo->prepare("DELETE FROM `{$prefix}sessions` WHERE user_id = ?");
+            $revoke->execute([$ownerId]);
+        }
+        $pdo->commit();
+    } catch (Throwable $exception) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        throw $exception;
+    }
+    webJsonResponse(['ok' => true, 'barbershop_id' => (int)$shopId]);
+}
+
 function webHandlePlatformCustomerSave(): never
 {
     webRequireMethod('POST');
@@ -753,6 +813,8 @@ function webDispatch(): never
             webHandlePlatformCustomers();
         case 'platform_customer_details':
             webHandlePlatformCustomerDetails();
+        case 'platform_customer_update':
+            webHandlePlatformCustomerUpdate();
         case 'platform_customer_save':
             webHandlePlatformCustomerSave();
         case 'platform_plan_save':

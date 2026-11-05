@@ -219,6 +219,7 @@ img { display: block; max-width: 100%; }
 .shop-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 24px; margin: 18px 0 24px; padding: 18px; border: 1px solid var(--line); border-radius: 13px; }
 .shop-detail-grid div { align-items: flex-start; }
 .shop-detail-grid strong { overflow-wrap: anywhere; }
+.shop-detail-email strong, .email-detail { overflow-wrap: anywhere; word-break: break-word; }
 
 .more-menu { position: fixed; z-index: 30; top: 66px; right: 20px; width: min(330px, calc(100vw - 40px)); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; padding: 13px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 15px; box-shadow: var(--shadow); }
 .more-menu-title { grid-column: 1 / -1; padding: 2px 4px 6px; color: var(--muted); font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
