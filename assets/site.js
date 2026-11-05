@@ -13,14 +13,17 @@
 
     const bootstrap = window.BARBERSHOP_BOOTSTRAP || { view: 'login' };
     const app = document.getElementById('app');
-    const routes = ['login', 'forgot', 'home', 'agenda', 'clients', 'team', 'services', 'account', 'booking', 'history', 'reset'];
-    const roleLabels = { admin: 'administrador', barber: 'barbeiro', client: 'cliente' };
+    const routes = ['login', 'forgot', 'home', 'agenda', 'clients', 'team', 'services', 'account', 'booking', 'history', 'platform', 'reset'];
+    const roleLabels = { admin: 'administrador da barbearia', barber: 'barbeiro', client: 'cliente' };
     const statusLabels = {
         pending: 'Pendente',
         confirmed: 'Confirmado',
         completed: 'Concluído',
         cancelled: 'Cancelado',
         no_show: 'Não compareceu'
+    };
+    const subscriptionStatusLabels = {
+        trialing: 'Em teste', active: 'Pagando', past_due: 'Inadimplente', paused: 'Pausada', canceled: 'Cancelada', expired: 'Vencida'
     };
     const errorLabels = {
         invalid_credentials: 'E-mail ou senha inválidos.',
@@ -57,6 +60,13 @@
         internal_error: 'Não foi possível concluir a operação agora.',
         not_found: 'Recurso não encontrado.',
         not_installed: 'O serviço ainda não está disponível.',
+        billing_not_ready: 'A estrutura comercial ainda não foi ativada no banco de dados.',
+        invalid_plan: 'Confira nome, código, preço, periodicidade e teste do plano.',
+        plan_code_exists: 'Já existe um plano com esse código.',
+        invalid_checkout_request: 'Informe a barbearia, o plano e um e-mail válido para o checkout.',
+        barbershop_not_found: 'Barbearia não encontrada.',
+        payment_not_configured: 'O pagamento ainda não está configurado no servidor.',
+        payment_provider_error: 'O provedor de pagamento não aceitou o checkout agora.',
         csrf_unavailable: 'Não foi possível iniciar a proteção da sessão.'
     };
     const serviceReferences = [
@@ -259,8 +269,9 @@
     }
 
     function field(labelText, input, hint = '') {
-        const id = input.id || `field-${Math.random().toString(36).slice(2)}`;
-        input.id = id;
+        const nestedInput = input.querySelector && input.querySelector('input');
+        const id = input.id || (nestedInput ? nestedInput.id : '') || `field-${Math.random().toString(36).slice(2)}`;
+        if (!input.id && !nestedInput) input.id = id;
         return el('div', { className: 'field' }, [
             el('label', { htmlFor: id, text: labelText }),
             input,
@@ -270,6 +281,19 @@
 
     function input(type, id, value = '', options = {}) {
         return el('input', Object.assign({ type, id, value }, options));
+    }
+
+    function passwordControl(id, options = {}) {
+        const password = input('password', id, '', Object.assign({ autocomplete: 'off' }, options));
+        const toggle = button('Mostrar senha', 'button ghost small', () => {
+            const showing = password.type === 'text';
+            password.type = showing ? 'password' : 'text';
+            toggle.textContent = showing ? 'Mostrar senha' : 'Ocultar senha';
+            toggle.setAttribute('aria-pressed', showing ? 'false' : 'true');
+        });
+        toggle.setAttribute('aria-controls', id);
+        toggle.setAttribute('aria-pressed', 'false');
+        return el('div', { className: 'password-control' }, [password, toggle]);
     }
 
     function selectInput(id, options = {}) {
@@ -287,6 +311,7 @@
     }
 
     function navItems(role) {
+        if (state.user && state.user.platform_admin) return [['platform', 'Plataforma', 'PL'], ['account', 'Conta', 'CT'], ['more', 'Mais', '…']];
         if (role === 'admin') return [
             ['home', 'Início', 'IN'], ['agenda', 'Agenda', 'AG'], ['clients', 'Clientes', 'CL'], ['services', 'Serviços', 'SV'], ['more', 'Mais', '…']
         ];
@@ -299,6 +324,7 @@
     }
 
     function desktopNavItems(role) {
+        if (state.user && state.user.platform_admin) return [['platform', 'Plataforma', 'PL'], ['account', 'Conta', 'CT']];
         if (role === 'admin') return [
             ['home', 'Início', 'IN'], ['agenda', 'Agenda', 'AG'], ['clients', 'Clientes', 'CL'], ['team', 'Equipe', 'EQ'], ['services', 'Serviços', 'SV'], ['account', 'Conta', 'CT']
         ];
@@ -361,7 +387,7 @@
             ]),
             el('div', { className: 'sidebar-user' }, [
                 el('div', { className: 'user-name', text: user.name }),
-                el('div', { className: 'user-role', text: roleLabel(user.role) })
+                el('div', { className: 'user-role', text: user.platform_admin ? 'administrador da plataforma' : roleLabel(user.role) })
             ]),
             el('nav', { className: 'nav-list', 'aria-label': 'Navegação principal' }, desktopNavItems(user.role).map((item) => renderNavItem(item))),
             el('div', { className: 'sidebar-footer', text: 'Agenda online • horário de São Paulo' })
@@ -385,7 +411,7 @@
     }
 
     function pageTitleFor(view, role) {
-        const titles = { home: 'Visão geral', agenda: 'Agenda', clients: 'Clientes', team: 'Equipe', services: 'Serviços', account: 'Minha conta', booking: 'Novo agendamento', history: 'Meu histórico', login: 'Entrar', forgot: 'Recuperar senha', reset: 'Redefinir senha' };
+        const titles = { home: 'Visão geral', platform: 'Painel da plataforma', agenda: 'Agenda', clients: 'Clientes', team: 'Equipe', services: 'Serviços', account: 'Minha conta', booking: 'Novo agendamento', history: 'Meu histórico', login: 'Entrar', forgot: 'Recuperar senha', reset: 'Redefinir senha' };
         if (view === 'home' && role === 'admin') return 'Dashboard';
         return titles[view] || 'Barber Shop';
     }
@@ -467,9 +493,9 @@
 
     function renderLogin(card) {
         card.append(el('h2', { text: 'Entrar na conta' }), el('p', { className: 'subheading', text: 'Use o e-mail da sua conta Barber Shop.' }));
-        const form = el('form', { className: 'auth-form', novalidate: true });
+        const form = el('form', { className: 'auth-form', novalidate: true, autocomplete: 'off' });
         const email = input('email', 'login-email', '', { autocomplete: 'username', required: true, maxlength: 190, placeholder: 'voce@exemplo.com' });
-        const password = input('password', 'login-password', '', { autocomplete: 'current-password', required: true, maxlength: 4096, placeholder: 'Sua senha' });
+        const password = passwordControl('login-password', { required: true, maxlength: 4096, placeholder: 'Sua senha' });
         const message = el('p', { className: 'form-message', role: 'alert', 'aria-live': 'polite' });
         const submit = button('Entrar', 'button block');
         submit.type = 'submit';
@@ -481,7 +507,7 @@
             message.className = 'form-message';
             message.textContent = '';
             try {
-                const result = await api('login', { method: 'POST', body: { email: email.value.trim(), password: password.value } });
+                const result = await api('login', { method: 'POST', body: { email: email.value.trim(), password: password.querySelector('input').value } });
                 state.user = result.user || null;
                 if (!state.user) throw new ApiError('invalid_credentials', 401);
                 navigate(defaultViewForRole(state.user.role), true);
@@ -529,23 +555,25 @@
             card.append(el('div', { className: 'error-state', role: 'alert' }, [el('strong', { text: 'Link incompleto.' }), el('span', { text: 'Abra o link de recuperação recebido por e-mail.' })]), el('div', { className: 'auth-links' }, [authLink('Voltar para entrar', 'login')]));
             return;
         }
-        const form = el('form', { className: 'auth-form', novalidate: true });
-        const password = input('password', 'reset-password', '', { autocomplete: 'new-password', required: true, minlength: 8, maxlength: 4096, placeholder: 'Mínimo de 8 caracteres' });
-        const confirm = input('password', 'reset-confirm', '', { autocomplete: 'new-password', required: true, minlength: 8, maxlength: 4096, placeholder: 'Repita a nova senha' });
+        const form = el('form', { className: 'auth-form', novalidate: true, autocomplete: 'off' });
+        const password = passwordControl('reset-password', { required: true, minlength: 8, maxlength: 4096, placeholder: 'Mínimo de 8 caracteres' });
+        const confirm = passwordControl('reset-confirm', { required: true, minlength: 8, maxlength: 4096, placeholder: 'Repita a nova senha' });
         const message = el('p', { className: 'form-message', role: 'alert', 'aria-live': 'polite' });
         const submit = button('Salvar nova senha', 'button block');
         submit.type = 'submit';
         form.append(field('Nova senha', password, 'Use pelo menos 8 caracteres.'), field('Confirmar nova senha', confirm), message, submit);
         form.addEventListener('submit', async (event) => {
             event.preventDefault();
-            if (!form.reportValidity() || password.value !== confirm.value || submit.disabled) {
-                if (password.value !== confirm.value) { message.className = 'form-message error'; message.textContent = 'As senhas não coincidem.'; }
+            const passwordValue = password.querySelector('input').value;
+            const confirmValue = confirm.querySelector('input').value;
+            if (!form.reportValidity() || passwordValue !== confirmValue || submit.disabled) {
+                if (passwordValue !== confirmValue) { message.className = 'form-message error'; message.textContent = 'As senhas não coincidem.'; }
                 return;
             }
             setButtonBusy(submit, true, 'Salvando...');
             message.className = 'form-message';
             try {
-                const result = await api('reset_password', { method: 'POST', body: { token, new_password: password.value, new_password_confirm: confirm.value } });
+                const result = await api('reset_password', { method: 'POST', body: { token, new_password: passwordValue, new_password_confirm: confirmValue } });
                 state.resetToken = '';
                 message.className = 'form-message success';
                 message.textContent = result.message || 'Senha redefinida. Você já pode entrar.';
@@ -561,11 +589,12 @@
     }
 
     function defaultViewForRole(role) {
+        if (state.user && state.user.platform_admin) return 'platform';
         return role === 'client' ? 'home' : 'home';
     }
 
     async function renderAuthenticated() {
-        const validViews = state.user.role === 'admin' ? ['home', 'agenda', 'clients', 'team', 'services', 'account'] : state.user.role === 'barber' ? ['home', 'agenda', 'services', 'account'] : ['home', 'booking', 'history', 'account'];
+        const validViews = state.user.platform_admin ? ['platform', 'account'] : state.user.role === 'admin' ? ['home', 'agenda', 'clients', 'team', 'services', 'account'] : state.user.role === 'barber' ? ['home', 'agenda', 'services', 'account'] : ['home', 'booking', 'history', 'account'];
         if (!validViews.includes(state.view)) {
             state.view = 'home';
             const url = new URL(window.location.href);
@@ -592,6 +621,7 @@
     }
 
     async function renderView(content, renderId) {
+        if (state.view === 'platform') return renderPlatformPage(content);
         if (state.view === 'home') return renderHome(content);
         if (state.view === 'agenda') return renderAgenda(content);
         if (state.view === 'clients') return renderPeoplePage(content, 'client');
@@ -611,6 +641,150 @@
 
     function statCard(label, value) {
         return el('div', { className: 'card stat-card' }, [el('div', { className: 'stat-label', text: label }), el('div', { className: 'stat-value', text: value === undefined || value === null ? '—' : value })]);
+    }
+
+    function subscriptionPill(status) {
+        return el('span', { className: `status ${status || ''}`, text: subscriptionStatusLabels[status] || status || 'Sem status' });
+    }
+
+    function formatUtcDateTime(value) {
+        if (!value) return 'Sem data';
+        const parsed = new Date(String(value).replace(' ', 'T') + (String(value).endsWith('Z') ? '' : 'Z'));
+        if (Number.isNaN(parsed.getTime())) return String(value);
+        return new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Sao_Paulo' }).format(parsed);
+    }
+
+    async function renderPlatformPage(content) {
+        const result = await api('platform_dashboard');
+        const metrics = result.metrics || {};
+        const upcoming = Array.isArray(result.upcoming) ? result.upcoming : [];
+        clear(content);
+        content.append(pageIntro('Painel da plataforma', 'Seu sistema por apenas R$ 1 por dia: o plano custa R$ 30 por mês.', [button('Atualizar dados', 'button secondary', () => renderApp())]));
+        content.append(el('div', { className: 'stats-grid' }, [
+            statCard('Barbearias cadastradas', metrics.barbershops),
+            statCard('Assinaturas pagantes', metrics.active_subscriptions),
+            statCard('Em teste', metrics.trialing),
+            statCard('Inadimplentes', metrics.past_due),
+            statCard('Testes vencidos', metrics.expired),
+            statCard('Barbeiros ativos', metrics.active_barbers),
+            statCard('Clientes ativos', metrics.active_clients)
+        ]));
+        const section = el('section', { className: 'card section-card' }, [
+            el('h3', { text: 'Atenção comercial' }),
+            el('p', { className: 'section-description', text: 'Testes e assinaturas que precisam de acompanhamento.' })
+        ]);
+        if (!upcoming.length) {
+            section.append(emptyState('Nenhuma assinatura pendente', 'Os dados aparecerão aqui quando houver testes ou cobranças em acompanhamento.'));
+        } else {
+            const list = el('div', { className: 'record-list' });
+            upcoming.forEach((item) => {
+                const deadline = item.status === 'trialing' ? item.trial_ends_at : item.current_period_end;
+                list.appendChild(el('article', { className: 'record-row' }, [
+                    el('div', { className: 'record-main' }, [
+                        el('strong', { text: item.barbershop_name }),
+                        el('span', { text: item.status === 'trialing' ? `Teste termina em ${formatUtcDateTime(deadline)}` : `Período atual até ${formatUtcDateTime(deadline)}` })
+                    ]),
+                    el('div', { className: 'record-secondary' }, [subscriptionPill(item.status), el('span', { text: item.plan_name || item.plan_code || 'Plano não definido' })])
+                ]));
+            });
+            section.append(list);
+        }
+        content.append(section);
+
+        const plansSection = el('section', { className: 'card section-card' }, [
+            el('h3', { text: 'Planos e pagamentos' }),
+            el('p', { className: 'section-description', text: 'A cobrança web será feita pelo Checkout do Asaas. A confirmação ficará dependente dos webhooks do servidor.' })
+        ]);
+        try {
+            const planResult = await api('platform_plans');
+            const configuredText = planResult.payment_configured
+                ? `Asaas ${planResult.environment === 'production' ? 'produção' : 'sandbox'} configurado.`
+                : 'Asaas ainda não configurado: nenhuma cobrança real será iniciada.';
+            plansSection.append(el('p', { className: planResult.payment_configured ? 'form-message success' : 'form-message', text: configuredText }));
+            const plans = Array.isArray(planResult.plans) ? planResult.plans : [];
+            if (!plans.length) {
+                plansSection.append(emptyState('Nenhum plano ativo', 'Cadastre o primeiro plano e seu preço antes de liberar o checkout.'));
+            } else {
+                const planGrid = el('div', { className: 'quick-actions' });
+                plans.forEach((plan) => {
+                    const price = plan.price_cents === null ? 'Preço não definido' : `${(plan.price_cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}/${plan.billing_interval === 'year' ? 'ano' : 'mês'}`;
+                    planGrid.append(el('div', { className: 'quick-action' }, [
+                        el('strong', { text: plan.name }),
+                        el('span', { text: price }),
+                        el('span', { text: plan.description || 'Plano recorrente da plataforma.' })
+                    ]));
+                });
+                plansSection.append(planGrid);
+            }
+            const planForm = el('form', { className: 'form-card', novalidate: true, autocomplete: 'off' });
+            const planName = input('text', 'platform-plan-name', '', { required: true, maxlength: 120, value: 'Plano 1 Real por Dia', placeholder: 'Plano 1 Real por Dia' });
+            const planCode = input('text', 'platform-plan-code', '', { required: true, maxlength: 64, pattern: '[a-z0-9][a-z0-9_-]{1,63}', value: 'um_real_por_dia', placeholder: 'um_real_por_dia' });
+            const planPrice = input('text', 'platform-plan-price', '', { required: true, inputmode: 'decimal', value: '30,00', placeholder: '30,00' });
+            const planInterval = selectInput('platform-plan-interval', { required: true });
+            addSelectOptions(planInterval, [{ id: 'month', name: 'Mensal' }, { id: 'year', name: 'Anual' }], null);
+            const planTrial = input('number', 'platform-plan-trial', '0', { required: true, min: 0, max: 30, step: 1 });
+            const planDescription = input('text', 'platform-plan-description', '', { maxlength: 500, value: 'Seu sistema completo por apenas R$ 1 por dia.', placeholder: 'Descrição mostrada no painel' });
+            const planMessage = el('p', { className: 'form-message', role: 'alert', 'aria-live': 'polite' });
+            const planSubmit = button('Cadastrar plano', 'button');
+            planSubmit.type = 'submit';
+            planForm.append(el('h3', { text: 'Novo plano' }), el('p', { text: 'O checkout só será liberado depois que o Asaas estiver configurado no servidor.' }), el('div', { className: 'form-grid' }, [field('Nome', planName), field('Código interno', planCode), field('Preço (R$)', planPrice), field('Periodicidade', planInterval), field('Dias de teste', planTrial), field('Descrição', planDescription)]), planMessage, el('div', { className: 'form-actions' }, [planSubmit]));
+            planForm.addEventListener('submit', async (event) => {
+                event.preventDefault();
+                if (!planForm.reportValidity() || planSubmit.disabled) return;
+                setButtonBusy(planSubmit, true, 'Salvando...');
+                planMessage.className = 'form-message';
+                try {
+                    await api('platform_plan_save', { method: 'POST', body: {
+                        name: planName.value.trim(), code: planCode.value.trim().toLowerCase(),
+                        price_cents: parseBRLCents(planPrice.value), billing_interval: planInterval.value,
+                        trial_days: Number(planTrial.value), description: planDescription.value.trim(), active: 1
+                    }});
+                    planMessage.className = 'form-message success';
+                    planMessage.textContent = 'Plano cadastrado.';
+                    window.setTimeout(() => renderApp(), 450);
+                } catch (error) {
+                    planMessage.className = 'form-message error';
+                    planMessage.textContent = friendlyError(error);
+                } finally { setButtonBusy(planSubmit, false); }
+            });
+            plansSection.append(planForm);
+            const shops = Array.isArray(planResult.barbershops) ? planResult.barbershops : [];
+            if (plans.length && shops.length) {
+                const checkoutForm = el('form', { className: 'form-card', novalidate: true, autocomplete: 'off' });
+                const checkoutShop = selectInput('platform-checkout-shop', { required: true });
+                addSelectOptions(checkoutShop, shops, 'Selecione a barbearia');
+                const checkoutPlan = selectInput('platform-checkout-plan', { required: true });
+                addSelectOptions(checkoutPlan, plans.map((plan) => ({ id: plan.id, name: `${plan.name} — R$ ${(plan.price_cents / 100).toFixed(2).replace('.', ',')}/${plan.billing_interval === 'year' ? 'ano' : 'mês'}` })), 'Selecione o plano');
+                const checkoutName = input('text', 'platform-checkout-name', '', { required: true, maxlength: 160, placeholder: 'Nome do responsável' });
+                const checkoutEmail = input('email', 'platform-checkout-email', '', { required: true, maxlength: 190, placeholder: 'responsavel@exemplo.com' });
+                const checkoutMessage = el('p', { className: 'form-message', role: 'alert', 'aria-live': 'polite' });
+                const checkoutSubmit = button('Gerar checkout Asaas', 'button secondary');
+                checkoutSubmit.type = 'submit';
+                checkoutForm.append(el('h3', { text: 'Gerar checkout' }), el('p', { text: 'O responsável será enviado ao checkout hospedado do Asaas. A cobrança só será confirmada por webhook.' }), el('div', { className: 'form-grid' }, [field('Barbearia', checkoutShop), field('Plano', checkoutPlan), field('Nome do responsável', checkoutName), field('E-mail do responsável', checkoutEmail)]), checkoutMessage, el('div', { className: 'form-actions' }, [checkoutSubmit]));
+                checkoutForm.addEventListener('submit', async (event) => {
+                    event.preventDefault();
+                    if (!checkoutForm.reportValidity() || checkoutSubmit.disabled) return;
+                    setButtonBusy(checkoutSubmit, true, 'Criando...');
+                    checkoutMessage.className = 'form-message';
+                    try {
+                        const checkout = await api('platform_checkout', { method: 'POST', body: {
+                            barbershop_id: Number(checkoutShop.value), plan_id: Number(checkoutPlan.value),
+                            customer_name: checkoutName.value.trim(), customer_email: checkoutEmail.value.trim()
+                        }});
+                        checkoutMessage.className = 'form-message success';
+                        checkoutMessage.textContent = 'Checkout criado. Abrindo a página do Asaas...';
+                        window.location.href = checkout.checkout_url;
+                    } catch (error) {
+                        checkoutMessage.className = 'form-message error';
+                        checkoutMessage.textContent = friendlyError(error);
+                    } finally { setButtonBusy(checkoutSubmit, false); }
+                });
+                plansSection.append(checkoutForm);
+            }
+        } catch (error) {
+            plansSection.append(pageError(error, () => renderApp()));
+        }
+        content.append(plansSection);
     }
 
     async function renderHome(content) {
@@ -984,13 +1158,13 @@
     }
 
     function userForm(role, editing, onSubmit) {
-        const form = el('form', { className: 'card form-card', novalidate: true });
+        const form = el('form', { className: 'card form-card', novalidate: true, autocomplete: 'off' });
         const name = input('text', 'user-name-input', editing ? editing.name : '', { maxlength: 160, required: true, autocomplete: 'name', placeholder: 'Nome completo' });
         const email = input('email', 'user-email-input', editing ? editing.email : '', { maxlength: 190, required: true, autocomplete: 'email', placeholder: 'email@exemplo.com' });
         const status = selectInput('user-status-input', { required: true });
         addSelectOptions(status, [{ id: 'active', name: 'Ativo' }, { id: 'inactive', name: 'Inativo' }], null);
         status.value = editing ? editing.status : 'active';
-        const password = input('password', 'user-password-input', '', { maxlength: 4096, autocomplete: editing ? 'new-password' : 'new-password', minlength: 8, required: !editing, placeholder: editing ? 'Deixe em branco para manter' : 'Mínimo de 8 caracteres' });
+        const password = passwordControl('user-password-input', { maxlength: 4096, minlength: 8, required: !editing, placeholder: editing ? 'Deixe em branco para manter' : 'Mínimo de 8 caracteres' });
         const message = el('p', { className: 'form-message', role: 'alert', 'aria-live': 'polite' });
         const submit = button(editing ? 'Salvar alterações' : `Cadastrar ${role === 'client' ? 'cliente' : 'barbeiro'}`, 'button');
         submit.type = 'submit';
@@ -998,7 +1172,7 @@
         form.addEventListener('submit', async (event) => {
             event.preventDefault();
             if (!form.reportValidity() || submit.disabled) return;
-            if (!editing && password.value.length < 8) { message.className = 'form-message error'; message.textContent = 'A senha precisa ter no mínimo 8 caracteres.'; return; }
+            if (!editing && password.querySelector('input').value.length < 8) { message.className = 'form-message error'; message.textContent = 'A senha precisa ter no mínimo 8 caracteres.'; return; }
             setButtonBusy(submit, true, 'Salvando...');
             try {
                 await onSubmit();
@@ -1112,10 +1286,10 @@
     async function renderAccount(content) {
         clear(content);
         const user = state.user;
-        const passwordForm = el('form', { className: 'card form-card', novalidate: true });
-        const current = input('password', 'current-password', '', { autocomplete: 'current-password', required: true, maxlength: 4096 });
-        const next = input('password', 'new-password', '', { autocomplete: 'new-password', required: true, minlength: 8, maxlength: 4096 });
-        const confirm = input('password', 'new-password-confirm', '', { autocomplete: 'new-password', required: true, minlength: 8, maxlength: 4096 });
+        const passwordForm = el('form', { className: 'card form-card', novalidate: true, autocomplete: 'off' });
+        const current = passwordControl('current-password', { required: true, maxlength: 4096 });
+        const next = passwordControl('new-password', { required: true, minlength: 8, maxlength: 4096 });
+        const confirm = passwordControl('new-password-confirm', { required: true, minlength: 8, maxlength: 4096 });
         const message = el('p', { className: 'form-message', role: 'alert', 'aria-live': 'polite' });
         const submit = button('Alterar senha', 'button');
         submit.type = 'submit';
@@ -1123,11 +1297,14 @@
         passwordForm.addEventListener('submit', async (event) => {
             event.preventDefault();
             if (!passwordForm.reportValidity() || submit.disabled) return;
-            if (next.value !== confirm.value) { message.className = 'form-message error'; message.textContent = 'As senhas não coincidem.'; return; }
+            const currentValue = current.querySelector('input').value;
+            const nextValue = next.querySelector('input').value;
+            const confirmValue = confirm.querySelector('input').value;
+            if (nextValue !== confirmValue) { message.className = 'form-message error'; message.textContent = 'As senhas não coincidem.'; return; }
             setButtonBusy(submit, true, 'Salvando...');
             try {
-                const result = await api('change_password', { method: 'POST', body: { current_password: current.value, new_password: next.value, new_password_confirm: confirm.value } });
-                current.value = ''; next.value = ''; confirm.value = '';
+                const result = await api('change_password', { method: 'POST', body: { current_password: currentValue, new_password: nextValue, new_password_confirm: confirmValue } });
+                current.querySelector('input').value = ''; next.querySelector('input').value = ''; confirm.querySelector('input').value = '';
                 if (result.require_login) {
                     state.user = null;
                     navigate('login', true);

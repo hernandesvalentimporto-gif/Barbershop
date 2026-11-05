@@ -33,6 +33,16 @@ return [
         ],
     ],
 
+    'payment' => [
+        'provider' => 'asaas',
+        'environment' => 'sandbox',
+        'base_url' => 'https://api-sandbox.asaas.com',
+        'checkout_base_url' => 'https://asaas.com',
+        // Nunca publique a chave da API ou o token de webhook no GitHub.
+        'api_key' => 'PREENCHA_APENAS_NO_SERVIDOR',
+        'webhook_token' => 'GERE_UM_TOKEN_LONGO_E_ALEATORIO',
+    ],
+
     'sync' => [
         'enabled' => true,
         'conflict_strategy' => 'server_wins_for_appointments',

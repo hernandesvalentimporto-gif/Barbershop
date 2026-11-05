@@ -141,6 +141,8 @@ img { display: block; max-width: 100%; }
 .field input::placeholder, .field textarea::placeholder { color: var(--muted-2); }
 .field input:hover, .field select:hover, .field textarea:hover { border-color: #4c4f55; }
 .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--gold); outline: none; box-shadow: 0 0 0 3px rgba(231, 185, 78, .12); }
+.password-control { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.password-control .button { white-space: nowrap; }
 .field-hint { color: var(--muted-2); font-size: 12px; }
 .form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin-top: 20px; }
 .form-message { min-height: 20px; margin: 0; color: var(--muted); font-size: 13px; }

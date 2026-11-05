@@ -196,6 +196,7 @@ function webSafeUser(array $user): array
         'email' => (string)($user['email'] ?? ''),
         'role' => (string)($user['role'] ?? ''),
         'status' => (string)($user['status'] ?? ''),
+        'platform_admin' => (int)($user['platform_admin'] ?? 0) === 1,
     ];
 }
 
@@ -241,7 +242,7 @@ function webOpenDatabase(): array
 function webStoredSessionUser(PDO $pdo, string $prefix, string $token): ?array
 {
     ensureSessions($pdo, $prefix);
-    $stmt = $pdo->prepare("SELECT u.id, u.name, u.email, u.role, u.status
+    $stmt = $pdo->prepare("SELECT u.id, u.name, u.email, u.role, u.status, u.platform_admin
         FROM `{$prefix}sessions` s
         INNER JOIN `{$prefix}users` u ON u.id = s.user_id
         WHERE s.token_hash = ? AND s.expires_at > UTC_TIMESTAMP() AND u.status = 'active'

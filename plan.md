@@ -1,6 +1,6 @@
 # Site Barber Shop Sistemas HP — plano aprovado
 
-O usuário escolheu concluir primeiro o site PHP/MySQL, sem gerar outro APK. Usar a hospedagem em https://sistemashp.com.br/barbershop/, o banco existente e a API 1.1.0 já publicada. Preservar o projeto Android e todos os dados. Desenvolver em `web/php-site`, validar com dados sintéticos locais e publicar pelo FTP existente depois da verificação.
+O usuário escolheu concluir primeiro o site PHP/MySQL, deixar pagamentos para uma etapa posterior e só depois iniciar o APK Android/Apple. Usar a hospedagem em https://sistemashp.com.br/barbershop/, o banco existente e a API 1.1.0 já publicada. Preservar o projeto Android e todos os dados. Desenvolver em `web/php-site`, validar com dados sintéticos locais e publicar pelo FTP existente depois da verificação.
 
 ## Implementação
 
@@ -24,4 +24,4 @@ Conta: troca de senha autenticada e fluxo de recuperação por token de uso úni
 
 Reutilizar preto e dourado e a logo Barber Shop Sistemas HP fornecidos. Interface operacional, sem números fictícios ou módulos financeiros/estoque simulados. Menu lateral em desktop e navegação inferior no celular. Botão Novo atendimento evidente na Agenda. Formulários com rótulos completos, estados de envio, erros próximos aos campos e confirmação de sucesso. Português brasileiro, datas dd/mm/aaaa, moeda R$ e horário America/Sao_Paulo.
 
-Não há nova build APK, publicação em lojas, reinstalação do banco ou alteração de credenciais do servidor neste trabalho.
+Pagamentos e integração Asaas ficam estacionados até o site operacional estar concluído e revisado. Não há nova build APK, publicação em lojas, reinstalação do banco ou alteração de credenciais do servidor neste trabalho. O APK Android e a versão Apple serão tratados somente depois da conclusão da etapa web.

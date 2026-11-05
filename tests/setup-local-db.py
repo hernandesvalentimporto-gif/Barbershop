@@ -12,7 +12,7 @@ db_name = 'barber_web_test'
 db_user = 'barber_web_test'
 db_password = secrets.token_urlsafe(24)
 mysql = ['sudo', 'mariadb', '--socket=' + socket, '-u', 'root']
-subprocess.run(mysql + ['-e', f"CREATE DATABASE IF NOT EXISTS `{db_name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; CREATE USER IF NOT EXISTS '{db_user}'@'127.0.0.1' IDENTIFIED BY '{db_password}'; ALTER USER '{db_user}'@'127.0.0.1' IDENTIFIED BY '{db_password}'; GRANT ALL ON `{db_name}`.* TO '{db_user}'@'127.0.0.1';"], check=True)
+subprocess.run(mysql + ['-e', f"DROP DATABASE IF EXISTS `{db_name}`; CREATE DATABASE `{db_name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; CREATE USER IF NOT EXISTS '{db_user}'@'127.0.0.1' IDENTIFIED BY '{db_password}'; ALTER USER '{db_user}'@'127.0.0.1' IDENTIFIED BY '{db_password}'; GRANT ALL ON `{db_name}`.* TO '{db_user}'@'127.0.0.1';"], check=True)
 subprocess.run(mysql + [db_name], input=(root / 'tests/schema.sql').read_text(), text=True, check=True)
 password_hash = subprocess.check_output(['php', '-r', "echo password_hash('LocalTestPass-2026', PASSWORD_BCRYPT);"], text=True)
 fixture = f"""
