@@ -12,39 +12,30 @@ jobs:
     steps:
       - name: Baixar o código
         uses: actions/checkout@v4
-      - name: Executar migração uma única vez
-        env:
-          FTP_SERVER: ftp.sistemashp1.hospedagemdesites.ws
-          FTP_USERNAME: ${{ secrets.FTP_USERNAME || secrets.FTP_USER }}
-          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+      - name: Preparar instalador descartável
         run: |
           set -euo pipefail
           TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')"
           echo "::add-mask::$TOKEN"
-          sed "s/__MIGRATION_TOKEN__/$TOKEN/g" __apply_saas_migration.php > /tmp/__apply_saas_migration.php
-          export TOKEN
-          python3 - <<'PY'
-          import os
-          from ftplib import FTP
-          ftp = FTP(os.environ['FTP_SERVER'], timeout=30)
-          ftp.login(os.environ['FTP_USERNAME'], os.environ['FTP_PASSWORD'])
-          ftp.cwd('/public_html/barbershop')
-          with open('/tmp/__apply_saas_migration.php', 'rb') as handle:
-              ftp.storbinary('STOR __apply_saas_migration.php', handle)
-          ftp.quit()
-          PY
-          response="$(curl -fsS --max-time 30 --get --data-urlencode "token=$TOKEN" https://sistemashp.com.br/barbershop/__apply_saas_migration.php)"
+          sed -i "s/__MIGRATION_TOKEN__/$TOKEN/g" __apply_saas_migration.php
+          echo "MIGRATION_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+      - name: Publicar temporariamente o instalador pelo deploy oficial
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ftp.sistemashp1.hospedagemdesites.ws
+          username: ${{ secrets.FTP_USERNAME || secrets.FTP_USER }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          server-dir: /public_html/barbershop/
+          protocol: ftp
+          state-name: .barbershop-migration-sync-state.json
+          dry-run: false
+      - name: Executar migração e confirmar remoção automática
+        run: |
+          set -euo pipefail
+          response="$(curl -fsS --max-time 30 --get --data-urlencode "token=$MIGRATION_TOKEN" https://sistemashp.com.br/barbershop/__apply_saas_migration.php)"
           test "$response" = "migration_ok"
-          python3 - <<'PY'
-          import os
-          from ftplib import FTP
-          ftp = FTP(os.environ['FTP_SERVER'], timeout=30)
-          ftp.login(os.environ['FTP_USERNAME'], os.environ['FTP_PASSWORD'])
-          ftp.cwd('/public_html/barbershop')
-          try:
-              ftp.delete('__apply_saas_migration.php')
-          except Exception:
-              pass
-          ftp.quit()
-          PY
+          if curl -fsS --max-time 10 -o /dev/null https://sistemashp.com.br/barbershop/__apply_saas_migration.php; then
+            echo "temporary installer still responds; migration did not remove it"
+            exit 1
+          fi
           echo "Migration completed and temporary installer removed."
