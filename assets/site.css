@@ -97,6 +97,8 @@ img { display: block; max-width: 100%; }
 .stat-label { color: var(--muted); font-size: 13px; }
 .stat-value { margin-top: 15px; color: var(--gold-bright); font-size: 31px; font-weight: 850; letter-spacing: -.045em; }
 .dashboard-grid { display: grid; grid-template-columns: 1.2fr .8fr; gap: 18px; }
+.dashboard-stats { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.platform-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .section-card { min-width: 0; padding: 22px; }
 .section-card h3 { margin: 0 0 4px; font-size: 18px; letter-spacing: -.02em; }
 .section-card > .section-description { margin: 0 0 18px; color: var(--muted); font-size: 13px; }
@@ -105,6 +107,21 @@ img { display: block; max-width: 100%; }
 .quick-action:hover { border-color: var(--gold-dark); background: rgba(231, 185, 78, .08); }
 .quick-action strong { font-size: 14px; }
 .quick-action span { color: var(--muted); font-size: 12px; }
+.dashboard-actions { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.dashboard-actions .quick-action { display: grid; grid-template-columns: 42px minmax(0, 1fr); align-items: center; min-height: 82px; }
+.dashboard-actions .quick-action-symbol { display: grid; place-items: center; width: 40px; height: 40px; border: 1px solid rgba(231, 185, 78, .3); border-radius: 12px; color: var(--gold-bright); background: rgba(231, 185, 78, .1); font-size: 12px; font-weight: 900; }
+.dashboard-actions .quick-action-copy { display: grid; gap: 5px; }
+.dashboard-actions .quick-action-copy strong { color: var(--text); }
+.dashboard-actions .quick-action-copy span { color: var(--muted); }
+
+.platform-tabs { display: flex; flex-wrap: wrap; gap: 9px; margin: 0 0 19px; }
+.platform-tab { min-height: 46px; padding: 10px 17px; border: 1px solid var(--line); border-radius: 11px; color: var(--text); background: var(--surface-2); font-weight: 800; transition: background .18s ease, border-color .18s ease, transform .15s ease; }
+.platform-tab:hover { border-color: var(--gold-dark); transform: translateY(-1px); }
+.platform-tab[aria-pressed="true"] { border-color: var(--gold); color: var(--bg); background: var(--gold); }
+.filter-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 15px; }
+.filter-button { min-height: 38px; padding: 8px 13px; border: 1px solid var(--line); border-radius: 999px; color: var(--text); background: var(--surface-2); font-size: 13px; font-weight: 750; }
+.filter-button:hover { border-color: var(--gold-dark); }
+.filter-button[aria-pressed="true"] { border-color: var(--gold); color: var(--bg); background: var(--gold); }
 
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 17px; }
 .date-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
@@ -214,6 +231,7 @@ img { display: block; max-width: 100%; }
 @media (max-width: 1050px) {
     .sidebar { width: 228px; }
     .app-shell { grid-template-columns: 228px minmax(0, 1fr); }
+    .dashboard-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .auth-brand { padding: 45px 35px; }
     .auth-card { padding: 45px 35px; }
     .dashboard-grid, .account-grid { grid-template-columns: 1fr; }
@@ -229,7 +247,10 @@ img { display: block; max-width: 100%; }
     .page-intro { align-items: flex-start; flex-direction: column; gap: 16px; }
     .page-actions { justify-content: flex-start; }
     .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .dashboard-stats, .platform-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .dashboard-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .mobile-nav { position: fixed; z-index: 20; right: 0; bottom: 0; left: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); padding: 7px 7px calc(7px + env(safe-area-inset-bottom)); background: rgba(13, 14, 16, .96); border-top: 1px solid var(--line); backdrop-filter: blur(14px); }
+    .mobile-nav.platform-mobile-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .mobile-nav-item { min-width: 0; flex-direction: column; justify-content: center; gap: 2px; padding: 7px 2px; border-radius: 9px; text-align: center; }
     .mobile-nav-item .nav-label { overflow: hidden; max-width: 100%; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
     .mobile-nav-item .nav-symbol { height: 18px; }

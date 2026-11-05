@@ -23,7 +23,7 @@
         no_show: 'Não compareceu'
     };
     const subscriptionStatusLabels = {
-        trialing: 'Em teste', active: 'Pagando', past_due: 'Inadimplente', paused: 'Pausada', canceled: 'Cancelada', expired: 'Vencida'
+        trialing: 'Em teste', active: 'Pagando', past_due: 'Inadimplente', paused: 'Pausada', canceled: 'Cancelada', expired: 'Vencida', without_subscription: 'Sem assinatura'
     };
     const errorLabels = {
         invalid_credentials: 'E-mail ou senha inválidos.',
@@ -97,6 +97,8 @@
         agendaDate: saoPauloToday(),
         editingUser: null,
         editingService: null,
+        platformSection: 'overview',
+        platformCustomerFilter: 'all',
         renderId: 0,
         toastTimer: null
     };
@@ -312,7 +314,7 @@
     }
 
     function navItems(role) {
-        if (state.user && state.user.platform_admin) return [['platform', 'Plataforma', 'PL'], ['account', 'Conta', 'CT'], ['more', 'Mais', '…']];
+        if (state.user && state.user.platform_admin) return [['platform', 'Plataforma', 'PL'], ['account', 'Conta', 'CT']];
         if (role === 'admin') return [
             ['home', 'Início', 'IN'], ['agenda', 'Agenda', 'AG'], ['clients', 'Clientes', 'CL'], ['services', 'Serviços', 'SV'], ['more', 'Mais', '…']
         ];
@@ -413,7 +415,8 @@
             ])
         ]);
         const content = el('main', { id: 'main-content', className: 'main-content', tabindex: '-1' });
-        const mobile = el('nav', { className: 'mobile-nav', 'aria-label': 'Navegação móvel' }, navItems(user.role).map((item) => renderNavItem(item, true)));
+        const mobileClass = user.platform_admin ? 'mobile-nav platform-mobile-nav' : 'mobile-nav';
+        const mobile = el('nav', { className: mobileClass, 'aria-label': 'Navegação móvel' }, navItems(user.role).map((item) => renderNavItem(item, true)));
         const mainArea = el('div', { className: 'main-area' }, [topbar, content, mobile]);
         app.append(sidebar, mainArea);
         return content;
@@ -656,6 +659,19 @@
         return el('span', { className: `status ${status || ''}`, text: subscriptionStatusLabels[status] || status || 'Sem status' });
     }
 
+    function platformSectionTabs() {
+        const sections = [['overview', 'Visão geral'], ['shops', 'Barbearias'], ['billing', 'Planos e pagamentos']];
+        return el('nav', { className: 'platform-tabs', role: 'group', 'aria-label': 'Áreas administrativas da plataforma' }, sections.map(([id, label]) => {
+            const active = state.platformSection === id;
+            const control = button(label, 'platform-tab', () => {
+                state.platformSection = id;
+                renderApp();
+            });
+            control.setAttribute('aria-pressed', active ? 'true' : 'false');
+            return control;
+        }));
+    }
+
     function formatUtcDateTime(value) {
         if (!value) return 'Sem data';
         const parsed = new Date(String(value).replace(' ', 'T') + (String(value).endsWith('Z') ? '' : 'Z'));
@@ -667,18 +683,24 @@
         const result = await api('platform_dashboard');
         const metrics = result.metrics || {};
         const upcoming = Array.isArray(result.upcoming) ? result.upcoming : [];
+        const recentSignups = Array.isArray(result.recent_signups) ? result.recent_signups : [];
+        if (!['overview', 'shops', 'billing'].includes(state.platformSection)) state.platformSection = 'overview';
+        const sectionKey = state.platformSection;
         clear(content);
-        content.append(pageIntro('Painel da plataforma', 'Seu sistema por apenas R$ 1 por dia: o plano custa R$ 30 por mês.', [button('Atualizar dados', 'button secondary', () => renderApp())]));
-        content.append(el('div', { className: 'stats-grid' }, [
+        content.append(pageIntro('Painel da plataforma', 'Gerencie sua plataforma SaaS, as barbearias e as assinaturas em áreas separadas.', [button('Atualizar dados', 'button secondary', () => renderApp())]));
+        content.append(platformSectionTabs());
+        content.append(el('div', { className: 'stats-grid platform-stats', hidden: sectionKey !== 'overview' }, [
             statCard('Barbearias cadastradas', metrics.barbershops),
             statCard('Assinaturas pagantes', metrics.active_subscriptions),
             statCard('Em teste', metrics.trialing),
             statCard('Inadimplentes', metrics.past_due),
             statCard('Testes vencidos', metrics.expired),
             statCard('Barbeiros ativos', metrics.active_barbers),
-            statCard('Clientes ativos', metrics.active_clients)
+            statCard('Clientes cadastrados', metrics.total_clients),
+            statCard('Clientes ativos', metrics.active_clients),
+            statCard('Clientes inativos', metrics.inactive_clients)
         ]));
-        const section = el('section', { className: 'card section-card' }, [
+        const section = el('section', { className: 'card section-card platform-panel', hidden: sectionKey !== 'overview' }, [
             el('h3', { text: 'Atenção comercial' }),
             el('p', { className: 'section-description', text: 'Testes e assinaturas que precisam de acompanhamento.' })
         ]);
@@ -700,9 +722,28 @@
         }
         content.append(section);
 
-        const customersSection = el('section', { className: 'card section-card' }, [
+        const recentSection = el('section', { className: 'card section-card platform-panel', hidden: sectionKey !== 'overview' }, [
+            el('h3', { text: 'Cadastros recentes' }),
+            el('p', { className: 'section-description', text: 'Últimas barbearias adicionadas e situação atual da assinatura.' })
+        ]);
+        if (!recentSignups.length) {
+            recentSection.append(emptyState('Nenhuma barbearia cadastrada', 'Os novos cadastros aparecerão aqui.'));
+        } else {
+            const recentList = el('div', { className: 'record-list' });
+            recentSignups.forEach((item) => recentList.appendChild(el('article', { className: 'record-row' }, [
+                el('div', { className: 'record-main' }, [
+                    el('strong', { text: item.name }),
+                    el('span', { text: `Cadastro em ${formatUtcDateTime(item.created_at)}` })
+                ]),
+                el('div', { className: 'record-secondary' }, [subscriptionPill(item.subscription_status)])
+            ])));
+            recentSection.append(recentList);
+        }
+        content.append(recentSection);
+
+        const customersSection = el('section', { className: 'card section-card', hidden: sectionKey !== 'shops' }, [
             el('h3', { text: 'Clientes comerciais' }),
-            el('p', { className: 'section-description', text: 'Barbearias cadastradas, plano, teste, situação de pagamento e contatos.' })
+            el('p', { className: 'section-description', text: 'Barbearias cadastradas, plano, período, situação da assinatura e contatos.' })
         ]);
         try {
             const customerResult = await api('platform_customers');
@@ -710,23 +751,48 @@
             if (!customers.length) {
                 customersSection.append(emptyState('Nenhuma barbearia cadastrada', 'Cadastre o primeiro cliente comercial abaixo.'));
             } else {
+                const filters = [['all', 'Todas'], ['active', 'Pagando'], ['trialing', 'Em teste'], ['attention', 'Precisa de atenção']];
+                const filterBar = el('div', { className: 'filter-buttons', role: 'group', 'aria-label': 'Filtrar barbearias pela assinatura' });
                 const list = el('div', { className: 'record-list' });
-                customers.forEach((customer) => {
+                const renderCustomerList = () => {
+                    clear(list);
+                    const filtered = customers.filter((customer) => {
+                        if (state.platformCustomerFilter === 'all') return true;
+                        if (state.platformCustomerFilter === 'attention') return ['past_due', 'expired', 'paused', 'canceled', 'without_subscription'].includes(customer.subscription_status);
+                        return customer.subscription_status === state.platformCustomerFilter;
+                    });
+                    if (!filtered.length) {
+                        list.append(emptyState('Nenhuma barbearia nesta situação', 'Escolha outro filtro para ver mais cadastros.'));
+                        return;
+                    }
+                    filtered.forEach((customer) => {
                     const deadline = customer.subscription_status === 'trialing' ? customer.trial_ends_at : customer.current_period_end;
                     const period = deadline ? `Próximo marco: ${formatUtcDateTime(deadline)}` : 'Sem data de cobrança';
-                    const statusText = { active: 'Pagando', past_due: 'Inadimplente', expired: 'Vencido', trialing: 'Em teste' }[customer.subscription_status] || 'Sem assinatura';
+                    const statusText = { active: 'Assinatura ativa — pagante', past_due: 'Inadimplente', expired: 'Assinatura vencida', trialing: 'Em teste gratuito', paused: 'Assinatura pausada', canceled: 'Assinatura cancelada', without_subscription: 'Sem assinatura' }[customer.subscription_status] || 'Situação não informada';
+                    const clientCounts = `${Number(customer.total_clients || 0)} cliente(s): ${Number(customer.active_clients || 0)} ativo(s)/aprovado(s), ${Number(customer.inactive_clients || 0)} inativo(s)`;
                     list.append(el('article', { className: 'record-row' }, [
                         el('div', { className: 'record-main' }, [
                             el('strong', { text: customer.name }),
                             el('span', { text: `${customer.phone || 'Sem telefone'} • ${customer.address || 'Endereço não informado'}` }),
                             el('span', { text: `${customer.plan_name || 'Sem plano'} • ${period}` }),
-                            el('span', { className: 'record-detail', text: `${customer.active_barbers} barbeiro(s) ativo(s) • ${customer.active_clients} cliente(s) ativo(s)` })
+                            el('span', { className: 'record-detail', text: `${Number(customer.active_barbers || 0)} barbeiro(s) ativo(s) • ${clientCounts}` })
                         ]),
                         el('div', { className: 'record-secondary' }, [subscriptionPill(customer.subscription_status), el('span', { text: statusText })])
                     ]));
+                    });
+                };
+                filters.forEach(([value, label]) => {
+                    const filterButton = button(label, 'filter-button', () => {
+                        state.platformCustomerFilter = value;
+                        filterBar.querySelectorAll('button').forEach((item) => item.setAttribute('aria-pressed', item === filterButton ? 'true' : 'false'));
+                        renderCustomerList();
+                    });
+                    filterButton.setAttribute('aria-pressed', state.platformCustomerFilter === value ? 'true' : 'false');
+                    filterBar.append(filterButton);
                 });
-                customersSection.append(list);
-                customersSection.append(el('p', { className: 'field-hint', text: 'Os totais de barbeiros e clientes refletem a base atual do site. O vínculo individual por barbearia será a próxima etapa do isolamento multiempresa.' }));
+                renderCustomerList();
+                customersSection.append(filterBar, list);
+                customersSection.append(el('p', { className: 'field-hint', text: 'Pagando e inadimplente referem-se à assinatura da barbearia. Pagamentos de cortes individuais não são registrados neste painel.' }));
             }
             const customerForm = el('form', { className: 'form-card', novalidate: true, autocomplete: 'off' });
             const customerName = input('text', 'platform-customer-name', '', { required: true, maxlength: 180, placeholder: 'Nome da barbearia' });
@@ -759,7 +825,7 @@
         }
         content.append(customersSection);
 
-        const plansSection = el('section', { className: 'card section-card' }, [
+        const plansSection = el('section', { className: 'card section-card', hidden: sectionKey !== 'billing' }, [
             el('h3', { text: 'Planos e pagamentos' }),
             el('p', { className: 'section-description', text: 'A cobrança web será feita pelo Checkout do Asaas. A confirmação ficará dependente dos webhooks do servidor.' })
         ]);
@@ -861,19 +927,22 @@
         const data = result.data || {};
         clear(content);
         if (role === 'admin') {
-            const actions = [button('Novo atendimento', 'button', () => navigate('agenda')), button('Gerenciar equipe', 'button secondary', () => navigate('team'))];
-            content.append(pageIntro('Dashboard', 'Acompanhe os dados reais da operação e acesse as áreas administrativas.', actions));
-            content.append(el('div', { className: 'stats-grid' }, [
-                statCard('Usuários ativos', data.users), statCard('Clientes ativos', data.clients), statCard('Barbeiros ativos', data.barbers), statCard('Atendimentos hoje', data.appointments)
+            content.append(pageIntro('Dashboard', 'Acompanhe clientes aprovados e inativos, e abra cada área pelos botões de acesso rápido.', [button('Novo atendimento', 'button', () => navigate('agenda'))]));
+            content.append(el('div', { className: 'stats-grid dashboard-stats' }, [
+                statCard('Clientes cadastrados', data.clients_total),
+                statCard('Clientes ativos/aprovados', data.clients_active ?? data.clients),
+                statCard('Clientes inativos', data.clients_inactive),
+                statCard('Barbeiros ativos', data.barbers),
+                statCard('Atendimentos hoje', data.appointments)
             ]));
             const quick = el('section', { className: 'card section-card' }, [
                 el('h3', { text: 'Acesso rápido' }),
-                el('p', { className: 'section-description', text: 'Abra uma tarefa operacional sem sair do painel.' }),
-                el('div', { className: 'quick-actions' }, [
-                    quickAction('Agenda por data', 'Consultar e atualizar atendimentos.', 'agenda'),
-                    quickAction('Clientes', 'Editar contas e status.', 'clients'),
-                    quickAction('Equipe', 'Gerenciar barbeiros.', 'team'),
-                    quickAction('Serviços', 'Manter duração e valores.', 'services')
+                el('p', { className: 'section-description', text: 'Toque em um botão para abrir a área desejada.' }),
+                el('div', { className: 'quick-actions dashboard-actions' }, [
+                    quickAction('Agenda', 'Consultar e atualizar atendimentos.', 'agenda', 'AG'),
+                    quickAction('Clientes', 'Ver, aprovar, editar e inativar clientes.', 'clients', 'CL'),
+                    quickAction('Equipe', 'Gerenciar barbeiros e seus acessos.', 'team', 'EQ'),
+                    quickAction('Serviços', 'Manter duração, valores e disponibilidade.', 'services', 'SV')
                 ])
             ]);
             content.append(quick);
@@ -895,8 +964,11 @@
         content.append(section);
     }
 
-    function quickAction(title, description, view) {
-        return el('button', { type: 'button', className: 'quick-action', onclick: () => navigate(view) }, [el('strong', { text: title }), el('span', { text: description })]);
+    function quickAction(title, description, view, symbol = '→') {
+        return el('button', { type: 'button', className: 'quick-action', onclick: () => navigate(view) }, [
+            el('span', { className: 'quick-action-symbol', 'aria-hidden': 'true', text: symbol }),
+            el('span', { className: 'quick-action-copy' }, [el('strong', { text: title }), el('span', { text: description })])
+        ]);
     }
 
     function appointmentCard(item, role) {

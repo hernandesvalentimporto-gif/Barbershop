@@ -1082,6 +1082,12 @@ function handleSummary(PDO $pdo, string $prefix, array $user): never
         $counts = ['admin' => 0, 'barber' => 0, 'client' => 0];
         $stmt = $pdo->prepare("SELECT role, COUNT(*) AS total FROM `{$prefix}users` WHERE barbershop_id = ? AND status = 'active' GROUP BY role");
         $stmt->execute([$tenantId]); $rows = $stmt->fetchAll();
+        $clientStatsStmt = $pdo->prepare("SELECT COUNT(*) AS total,
+            SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active,
+            SUM(CASE WHEN status = 'inactive' THEN 1 ELSE 0 END) AS inactive
+            FROM `{$prefix}users` WHERE barbershop_id = ? AND role = 'client'");
+        $clientStatsStmt->execute([$tenantId]);
+        $clientStats = $clientStatsStmt->fetch() ?: [];
         foreach ($rows as $row) {
             if (array_key_exists((string)$row['role'], $counts)) {
                 $counts[(string)$row['role']] = (int)$row['total'];
@@ -1095,6 +1101,9 @@ function handleSummary(PDO $pdo, string $prefix, array $user): never
             'admins' => $counts['admin'],
             'barbers' => $counts['barber'],
             'clients' => $counts['client'],
+            'clients_total' => (int)($clientStats['total'] ?? 0),
+            'clients_active' => (int)($clientStats['active'] ?? 0),
+            'clients_inactive' => (int)($clientStats['inactive'] ?? 0),
             'appointments' => (int)$appointmentCount->fetchColumn(),
         ];
     } elseif ($user['role'] === 'barber') {

@@ -31,7 +31,7 @@ class Browser:
  def login(self,email,password):return self.call('login',{'email':email,'password':password})
 
 b=Browser()
-status,known=b.call('forgot_password',{'email':'client2@example.test'})
+status,known=b.call('forgot_password',{'email':'client3@example.test'})
 check(status==200 and known.get('ok'),'forgot password accepted')
 check('token' not in known and 'link' not in known,'reset secret not returned to browser')
 status,unknown=b.call('forgot_password',{'email':'missing@example.test'})
@@ -45,11 +45,11 @@ status,data=b.call('reset_password',{'token':token,'new_password':'ResetLocalPas
 check(status==200 and data.get('require_login'),'reset changes password')
 status,data=b.call('reset_password',{'token':token,'new_password':'RepeatLocalPass-2026','new_password_confirm':'RepeatLocalPass-2026'})
 check(status==422,'reset token is single use')
-status,data=b.login('client2@example.test','LocalTestPass-2026')
+status,data=b.login('client3@example.test','LocalTestPass-2026')
 check(status==401,'old password rejected after reset')
-status,data=b.login('client2@example.test','ResetLocalPass-2026')
+status,data=b.login('client3@example.test','ResetLocalPass-2026')
 check(status==200 and data.get('user',{}).get('role')=='client','new password works and role preserved')
-status,data=b.call('forgot_password',{'email':'client2@example.test'})
+status,data=b.call('forgot_password',{'email':'client3@example.test'})
 record=json.loads(MAIL.read_text().splitlines()[-1]);link=re.search(r'https?://\S+',record['body']).group(0)
 expired=parse_qs(urlparse(link).fragment)['token'][0]
 hash_value=hashlib.sha256(expired.encode()).hexdigest()

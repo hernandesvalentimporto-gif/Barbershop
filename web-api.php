@@ -111,6 +111,8 @@ function webHandlePlatformDashboard(): never
         'barbershops' => $scalar($pdo, "SELECT COUNT(*) FROM `{$prefix}barbershops`"),
         'active_barbers' => $scalar($pdo, "SELECT COUNT(*) FROM `{$prefix}users` WHERE role = 'barber' AND status = 'active'"),
         'active_clients' => $scalar($pdo, "SELECT COUNT(*) FROM `{$prefix}users` WHERE role = 'client' AND status = 'active'"),
+        'total_clients' => $scalar($pdo, "SELECT COUNT(*) FROM `{$prefix}users` WHERE role = 'client'"),
+        'inactive_clients' => $scalar($pdo, "SELECT COUNT(*) FROM `{$prefix}users` WHERE role = 'client' AND status = 'inactive'"),
         'trialing' => $scalar($pdo, "SELECT COUNT(*) FROM `{$table}` WHERE status = 'trialing' AND (trial_ends_at IS NULL OR trial_ends_at > UTC_TIMESTAMP())"),
         'active_subscriptions' => $scalar($pdo, "SELECT COUNT(*) FROM `{$table}` WHERE status = 'active'"),
         'past_due' => $scalar($pdo, "SELECT COUNT(*) FROM `{$table}` WHERE status = 'past_due'"),
@@ -145,7 +147,22 @@ function webHandlePlatformDashboard(): never
             'plan_name' => $row['plan_name'],
         ];
     }
-    webJsonResponse(['ok' => true, 'metrics' => $metrics, 'status_counts' => $statusCounts, 'upcoming' => $upcoming]);
+    $recentStmt = $pdo->query("SELECT b.id, b.name, b.created_at, s.status AS subscription_status
+        FROM `{$prefix}barbershops` b
+        LEFT JOIN `{$table}` s ON s.id = (
+            SELECT s2.id FROM `{$table}` s2 WHERE s2.barbershop_id = b.id ORDER BY s2.id DESC LIMIT 1
+        )
+        ORDER BY b.created_at DESC, b.id DESC LIMIT 5");
+    $recentSignups = [];
+    foreach ($recentStmt->fetchAll() as $row) {
+        $recentSignups[] = [
+            'id' => (int)$row['id'],
+            'name' => (string)$row['name'],
+            'created_at' => $row['created_at'],
+            'subscription_status' => $row['subscription_status'] === null ? 'without_subscription' : (string)$row['subscription_status'],
+        ];
+    }
+    webJsonResponse(['ok' => true, 'metrics' => $metrics, 'status_counts' => $statusCounts, 'upcoming' => $upcoming, 'recent_signups' => $recentSignups]);
 }
 
 function webHandlePlatformPlans(): never
@@ -207,8 +224,10 @@ function webHandlePlatformCustomers(): never
     $sql = "SELECT b.id, b.name, b.phone, b.address, b.created_at,
             s.status AS subscription_status, s.trial_ends_at, s.current_period_end,
             p.name AS plan_name, p.price_cents,
-            (SELECT COUNT(*) FROM `{$prefix}users` WHERE role = 'barber' AND status = 'active') AS active_barbers,
-            (SELECT COUNT(*) FROM `{$prefix}users` WHERE role = 'client' AND status = 'active') AS active_clients
+            (SELECT COUNT(*) FROM `{$prefix}users` WHERE barbershop_id = b.id AND role = 'barber' AND status = 'active') AS active_barbers,
+            (SELECT COUNT(*) FROM `{$prefix}users` WHERE barbershop_id = b.id AND role = 'client') AS total_clients,
+            (SELECT COUNT(*) FROM `{$prefix}users` WHERE barbershop_id = b.id AND role = 'client' AND status = 'active') AS active_clients,
+            (SELECT COUNT(*) FROM `{$prefix}users` WHERE barbershop_id = b.id AND role = 'client' AND status = 'inactive') AS inactive_clients
         FROM `{$prefix}barbershops` b
         LEFT JOIN `{$prefix}subscriptions` s ON s.id = (
             SELECT s2.id FROM `{$prefix}subscriptions` s2 WHERE s2.barbershop_id = b.id ORDER BY s2.id DESC LIMIT 1
@@ -229,8 +248,10 @@ function webHandlePlatformCustomers(): never
             'plan_name' => $row['plan_name'],
             'price_cents' => $row['price_cents'] === null ? null : (int)$row['price_cents'],
             'active_barbers' => (int)$row['active_barbers'],
+            'total_clients' => (int)$row['total_clients'],
             'active_clients' => (int)$row['active_clients'],
-            'counts_scope' => 'current_database',
+            'inactive_clients' => (int)$row['inactive_clients'],
+            'counts_scope' => 'barbershop',
         ];
     }
     webJsonResponse(['ok' => true, 'customers' => $customers]);
