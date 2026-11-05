@@ -99,6 +99,7 @@
         editingService: null,
         platformSection: 'overview',
         platformCustomerFilter: 'all',
+        platformDetailId: null,
         renderId: 0,
         toastTimer: null
     };
@@ -660,7 +661,7 @@
     }
 
     function platformSectionTabs() {
-        const sections = [['overview', 'Visão geral'], ['shops', 'Barbearias'], ['billing', 'Planos e pagamentos']];
+        const sections = [['overview', 'Visão geral'], ['shops', 'Barbearias'], ['finance', 'Financeiro'], ['billing', 'Planos']];
         return el('nav', { className: 'platform-tabs', role: 'group', 'aria-label': 'Áreas administrativas da plataforma' }, sections.map(([id, label]) => {
             const active = state.platformSection === id;
             const control = button(label, 'platform-tab', () => {
@@ -684,11 +685,11 @@
         const metrics = result.metrics || {};
         const upcoming = Array.isArray(result.upcoming) ? result.upcoming : [];
         const recentSignups = Array.isArray(result.recent_signups) ? result.recent_signups : [];
-        if (!['overview', 'shops', 'billing'].includes(state.platformSection)) state.platformSection = 'overview';
+        if (!['overview', 'shops', 'finance', 'billing', 'detail'].includes(state.platformSection)) state.platformSection = 'overview';
         const sectionKey = state.platformSection;
         clear(content);
-        content.append(pageIntro('Painel da plataforma', 'Gerencie sua plataforma SaaS, as barbearias e as assinaturas em áreas separadas.', [button('Atualizar dados', 'button secondary', () => renderApp())]));
-        content.append(platformSectionTabs());
+        content.append(pageIntro(sectionKey === 'detail' ? 'Cadastro da barbearia' : 'Painel da plataforma', sectionKey === 'detail' ? 'Dados comerciais e usuários vinculados a esta conta.' : 'Gerencie sua plataforma SaaS, as barbearias, o financeiro e os planos.', [button('Atualizar dados', 'button secondary', () => renderApp())]));
+        content.append(el('div', { hidden: sectionKey === 'detail' }, [platformSectionTabs()]));
         content.append(el('div', { className: 'stats-grid platform-stats', hidden: sectionKey !== 'overview' }, [
             statCard('Barbearias cadastradas', metrics.barbershops),
             statCard('Assinaturas pagantes', metrics.active_subscriptions),
@@ -774,10 +775,19 @@
                         el('div', { className: 'record-main' }, [
                             el('strong', { text: customer.name }),
                             el('span', { text: `${customer.phone || 'Sem telefone'} • ${customer.address || 'Endereço não informado'}` }),
+                            el('span', { text: `${customer.owner_name || 'Responsável não cadastrado'} • ${customer.owner_email || 'Sem e-mail do responsável'}` }),
                             el('span', { text: `${customer.plan_name || 'Sem plano'} • ${period}` }),
                             el('span', { className: 'record-detail', text: `${Number(customer.active_barbers || 0)} barbeiro(s) ativo(s) • ${clientCounts}` })
                         ]),
-                        el('div', { className: 'record-secondary' }, [subscriptionPill(customer.subscription_status), el('span', { text: statusText })])
+                        el('div', { className: 'record-secondary' }, [
+                            subscriptionPill(customer.subscription_status),
+                            el('span', { text: statusText }),
+                            button('Ver cadastro', 'button secondary small', () => {
+                                state.platformDetailId = Number(customer.id);
+                                state.platformSection = 'detail';
+                                renderApp();
+                            })
+                        ])
                     ]));
                     });
                 };
@@ -825,8 +835,67 @@
         }
         content.append(customersSection);
 
+        const financeSection = el('section', { className: 'card section-card', hidden: sectionKey !== 'finance' }, [
+            el('h3', { text: 'Financeiro das assinaturas' }),
+            el('p', { className: 'section-description', text: 'Acompanhe quem está em teste, com assinatura ativa, inadimplente ou vencida. O status só representa pagamento confirmado quando chega pelo provedor.' })
+        ]);
+        financeSection.append(el('div', { className: 'stats-grid platform-stats' }, [
+            statCard('Assinaturas ativas', metrics.active_subscriptions),
+            statCard('Em teste', metrics.trialing),
+            statCard('Inadimplentes', metrics.past_due),
+            statCard('Vencidas', metrics.expired)
+        ]));
+        try {
+            const financeResult = await api('platform_customers');
+            const financeCustomers = Array.isArray(financeResult.customers) ? financeResult.customers : [];
+            const filters = [['all', 'Todas'], ['past_due', 'Inadimplentes'], ['active', 'Ativas'], ['trialing', 'Em teste'], ['expired', 'Vencidas']];
+            const filterBar = el('div', { className: 'filter-buttons', role: 'group', 'aria-label': 'Filtrar assinaturas por situação financeira' });
+            const list = el('div', { className: 'record-list' });
+            let selectedFilter = 'all';
+            const renderFinanceList = () => {
+                clear(list);
+                const rows = financeCustomers.filter((shop) => selectedFilter === 'all' || shop.subscription_status === selectedFilter);
+                if (!rows.length) {
+                    list.append(emptyState('Nenhuma barbearia neste status', 'Quando houver registros, eles aparecerão nesta lista.'));
+                    return;
+                }
+                rows.forEach((shop) => {
+                    const deadline = shop.subscription_status === 'trialing' ? shop.trial_ends_at : shop.current_period_end;
+                    const amount = shop.price_cents === null ? 'Preço do plano não informado' : `${formatBRL(shop.price_cents)} por ${shop.billing_interval === 'year' ? 'ano' : 'mês'}`;
+                    const statusText = { active: 'Assinatura ativa', past_due: 'Inadimplente — cobrança pendente', expired: 'Período de teste/assinatura vencido', trialing: 'Em teste gratuito', paused: 'Pausada', canceled: 'Cancelada', without_subscription: 'Sem assinatura' }[shop.subscription_status] || 'Situação não informada';
+                    list.append(el('article', { className: 'record-row' }, [
+                        el('div', { className: 'record-main' }, [
+                            el('strong', { text: shop.name }),
+                            el('span', { text: `${shop.owner_name || 'Responsável não cadastrado'} • ${shop.owner_email || 'Sem e-mail'}` }),
+                            el('span', { className: 'record-detail', text: `${statusText} • ${amount}` }),
+                            el('span', { text: deadline ? `${shop.subscription_status === 'trialing' ? 'Fim do teste' : 'Próximo vencimento'}: ${formatUtcDateTime(deadline)}` : 'Sem vencimento informado' })
+                        ]),
+                        el('div', { className: 'record-secondary' }, [subscriptionPill(shop.subscription_status), button('Abrir cadastro', 'button secondary small', () => {
+                            state.platformDetailId = Number(shop.id);
+                            state.platformSection = 'detail';
+                            renderApp();
+                        })])
+                    ]));
+                });
+            };
+            filters.forEach(([value, label]) => {
+                const control = button(label, 'filter-button', () => {
+                    selectedFilter = value;
+                    filterBar.querySelectorAll('button').forEach((item) => item.setAttribute('aria-pressed', item === control ? 'true' : 'false'));
+                    renderFinanceList();
+                });
+                control.setAttribute('aria-pressed', value === selectedFilter ? 'true' : 'false');
+                filterBar.append(control);
+            });
+            renderFinanceList();
+            financeSection.append(filterBar, list, el('p', { className: 'field-hint', text: 'O valor acima é o preço cadastrado do plano, não um saldo de fatura. O sistema ainda não guarda extrato conciliado de cada pagamento; não tratamos assinatura ativa como comprovante de recebimento sem confirmação do provedor.' }));
+        } catch (error) {
+            financeSection.append(pageError(error, () => renderApp()));
+        }
+        content.append(financeSection);
+
         const plansSection = el('section', { className: 'card section-card', hidden: sectionKey !== 'billing' }, [
-            el('h3', { text: 'Planos e pagamentos' }),
+            el('h3', { text: 'Planos e checkout' }),
             el('p', { className: 'section-description', text: 'A cobrança web será feita pelo Checkout do Asaas. A confirmação ficará dependente dos webhooks do servidor.' })
         ]);
         try {
@@ -919,6 +988,46 @@
             plansSection.append(pageError(error, () => renderApp()));
         }
         content.append(plansSection);
+
+        const detailSection = el('section', { className: 'card section-card', hidden: sectionKey !== 'detail' }, [
+            button('Voltar às barbearias', 'button secondary', () => { state.platformSection = 'shops'; renderApp(); })
+        ]);
+        if (sectionKey !== 'detail') {
+            content.append(detailSection);
+            return;
+        }
+        try {
+            if (!state.platformDetailId) throw new ApiError('invalid_barbershop', 422);
+            const detailResult = await api('platform_customer_details', { params: { barbershop_id: state.platformDetailId } });
+            const shop = detailResult.barbershop || {};
+            const amount = shop.price_cents === null || shop.price_cents === undefined ? 'Não definido' : `${formatBRL(shop.price_cents)} por ${shop.billing_interval === 'year' ? 'ano' : 'mês'}`;
+            detailSection.append(
+                el('h2', { text: shop.name || 'Barbearia' }),
+                el('div', { className: 'record-secondary' }, [subscriptionPill(shop.subscription_status), el('span', { text: shop.plan_name || 'Sem plano' })]),
+                el('div', { className: 'profile-details shop-detail-grid' }, [
+                    el('div', {}, [el('span', { text: 'Responsável' }), el('strong', { text: shop.owner_name || 'Não cadastrado' })]),
+                    el('div', {}, [el('span', { text: 'E-mail' }), el('strong', { text: shop.owner_email || 'Não cadastrado' })]),
+                    el('div', {}, [el('span', { text: 'Telefone' }), el('strong', { text: shop.phone || 'Não informado' })]),
+                    el('div', {}, [el('span', { text: 'Endereço' }), el('strong', { text: shop.address || 'Não informado' })]),
+                    el('div', {}, [el('span', { text: 'Preço do plano' }), el('strong', { text: amount })]),
+                    el('div', {}, [el('span', { text: 'Início do teste' }), el('strong', { text: formatUtcDateTime(shop.trial_started_at) })]),
+                    el('div', {}, [el('span', { text: 'Fim do teste' }), el('strong', { text: formatUtcDateTime(shop.trial_ends_at) })]),
+                    el('div', {}, [el('span', { text: 'Fim do período atual' }), el('strong', { text: formatUtcDateTime(shop.current_period_end) })]),
+                    el('div', {}, [el('span', { text: 'Tolerância até' }), el('strong', { text: formatUtcDateTime(shop.grace_period_ends_at) })])
+                ])
+            );
+            const users = Array.isArray(detailResult.users) ? detailResult.users : [];
+            const userList = el('div', { className: 'record-list' });
+            users.forEach((user) => userList.append(el('article', { className: 'record-row' }, [
+                el('div', { className: 'record-main' }, [el('strong', { text: user.name }), el('span', { text: user.email })]),
+                el('div', { className: 'record-secondary' }, [el('span', { text: roleLabel(user.role) }), el('span', { text: user.status === 'active' ? 'Ativo' : 'Inativo' })])
+            ])));
+            detailSection.append(el('h3', { text: 'Contas vinculadas' }), users.length ? userList : emptyState('Nenhuma conta vinculada', ''));
+        } catch (error) {
+            if (error instanceof ApiError && error.code === 'invalid_barbershop') detailSection.append(emptyState('Selecione uma barbearia', 'Volte à lista para abrir um cadastro.'));
+            else detailSection.append(pageError(error, () => renderApp()));
+        }
+        content.append(detailSection);
     }
 
     async function renderHome(content) {

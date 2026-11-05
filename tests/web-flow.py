@@ -101,6 +101,14 @@ check(status==200 and set(shops)=={1,2}, 'platform admin sees both commercial sh
 check(shops[1].get('subscription_status')=='active' and shops[2].get('subscription_status')=='past_due', 'platform admin can distinguish paying from past-due subscriptions')
 check(shops[1].get('total_clients')==3 and shops[1].get('active_clients')==1 and shops[1].get('inactive_clients')==2, 'shop A customer counts are isolated in the commercial list')
 check(shops[2].get('total_clients')==2 and shops[2].get('active_clients')==1 and shops[2].get('inactive_clients')==1, 'shop B customer counts are isolated in the commercial list')
+check(shops[1].get('owner_name')=='Administrador Teste A' and shops[1].get('owner_email')=='admin@example.test', 'commercial customer list exposes the correct shop owner contact')
+status,details=platform.call('platform_customer_details',query={'barbershop_id':1})
+check(status==200 and details.get('barbershop',{}).get('name')=='Barbearia Teste A' and details['barbershop'].get('owner_email')=='admin@example.test', 'platform admin can open full commercial shop details')
+check({user['email'] for user in details.get('users',[])} >= {'admin@example.test','barber@example.test','client@example.test'}, 'shop detail includes its own tenant user accounts')
+status,details_other=admin.call('platform_customer_details',query={'barbershop_id':1})
+check(status==403, 'barbershop admin cannot access master commercial customer details')
+status,missing=platform.call('platform_customer_details',query={'barbershop_id':999})
+check(status==404, 'master detail returns not found for a nonexistent shop')
 
 # Cross-tenant reads and writes must fail or return only tenant-local records.
 status,data=admin.call('appointment_list',query={'date':date})

@@ -222,6 +222,8 @@ function webHandlePlatformCustomers(): never
     $pdo = $context['pdo'];
     $prefix = $context['prefix'];
     $sql = "SELECT b.id, b.name, b.phone, b.address, b.created_at,
+            (SELECT u.name FROM `{$prefix}users` u WHERE u.barbershop_id = b.id AND u.role = 'admin' AND u.platform_admin = 0 ORDER BY u.id LIMIT 1) AS owner_name,
+            (SELECT u.email FROM `{$prefix}users` u WHERE u.barbershop_id = b.id AND u.role = 'admin' AND u.platform_admin = 0 ORDER BY u.id LIMIT 1) AS owner_email,
             s.status AS subscription_status, s.trial_ends_at, s.current_period_end,
             p.name AS plan_name, p.price_cents,
             (SELECT COUNT(*) FROM `{$prefix}users` WHERE barbershop_id = b.id AND role = 'barber' AND status = 'active') AS active_barbers,
@@ -242,6 +244,8 @@ function webHandlePlatformCustomers(): never
             'phone' => $row['phone'] === null ? null : (string)$row['phone'],
             'address' => $row['address'] === null ? null : (string)$row['address'],
             'created_at' => $row['created_at'],
+            'owner_name' => $row['owner_name'] === null ? null : (string)$row['owner_name'],
+            'owner_email' => $row['owner_email'] === null ? null : (string)$row['owner_email'],
             'subscription_status' => $row['subscription_status'] === null ? 'without_subscription' : (string)$row['subscription_status'],
             'trial_ends_at' => $row['trial_ends_at'],
             'current_period_end' => $row['current_period_end'],
@@ -255,6 +259,57 @@ function webHandlePlatformCustomers(): never
         ];
     }
     webJsonResponse(['ok' => true, 'customers' => $customers]);
+}
+
+function webHandlePlatformCustomerDetails(): never
+{
+    webRequireMethod('GET');
+    $context = webAuthenticatedContext();
+    if (!(bool)($context['user']['platform_admin'] ?? false)) {
+        webError('forbidden', 403);
+    }
+    $shopId = filter_var($_GET['barbershop_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+    if ($shopId === false) {
+        webError('invalid_barbershop', 422);
+    }
+    $pdo = $context['pdo'];
+    $prefix = $context['prefix'];
+    $shopStmt = $pdo->prepare("SELECT b.id, b.name, b.phone, b.address, b.created_at,
+            (SELECT u.name FROM `{$prefix}users` u WHERE u.barbershop_id = b.id AND u.role = 'admin' AND u.platform_admin = 0 ORDER BY u.id LIMIT 1) AS owner_name,
+            (SELECT u.email FROM `{$prefix}users` u WHERE u.barbershop_id = b.id AND u.role = 'admin' AND u.platform_admin = 0 ORDER BY u.id LIMIT 1) AS owner_email,
+            s.status AS subscription_status, s.trial_started_at, s.trial_ends_at, s.current_period_start, s.current_period_end, s.grace_period_ends_at,
+            p.name AS plan_name, p.price_cents, p.billing_interval
+        FROM `{$prefix}barbershops` b
+        LEFT JOIN `{$prefix}subscriptions` s ON s.id = (SELECT s2.id FROM `{$prefix}subscriptions` s2 WHERE s2.barbershop_id = b.id ORDER BY s2.id DESC LIMIT 1)
+        LEFT JOIN `{$prefix}plans` p ON p.id = s.plan_id
+        WHERE b.id = ? LIMIT 1");
+    $shopStmt->execute([$shopId]);
+    $shop = $shopStmt->fetch();
+    if (!is_array($shop)) {
+        webError('barbershop_not_found', 404);
+    }
+    $userStmt = $pdo->prepare("SELECT id, name, email, role, status, created_at FROM `{$prefix}users`
+        WHERE barbershop_id = ? AND role IN ('admin','barber','client') ORDER BY FIELD(role,'admin','barber','client'), name, id");
+    $userStmt->execute([$shopId]);
+    $users = [];
+    foreach ($userStmt->fetchAll() as $user) {
+        $users[] = [
+            'id' => (int)$user['id'], 'name' => (string)$user['name'], 'email' => (string)$user['email'],
+            'role' => (string)$user['role'], 'status' => (string)$user['status'], 'created_at' => $user['created_at'],
+        ];
+    }
+    webJsonResponse(['ok' => true, 'barbershop' => [
+        'id' => (int)$shop['id'], 'name' => (string)$shop['name'],
+        'phone' => $shop['phone'] === null ? null : (string)$shop['phone'],
+        'address' => $shop['address'] === null ? null : (string)$shop['address'],
+        'created_at' => $shop['created_at'], 'owner_name' => $shop['owner_name'], 'owner_email' => $shop['owner_email'],
+        'subscription_status' => $shop['subscription_status'] === null ? 'without_subscription' : (string)$shop['subscription_status'],
+        'trial_started_at' => $shop['trial_started_at'], 'trial_ends_at' => $shop['trial_ends_at'],
+        'current_period_start' => $shop['current_period_start'], 'current_period_end' => $shop['current_period_end'],
+        'grace_period_ends_at' => $shop['grace_period_ends_at'], 'plan_name' => $shop['plan_name'],
+        'price_cents' => $shop['price_cents'] === null ? null : (int)$shop['price_cents'],
+        'billing_interval' => $shop['billing_interval'],
+    ], 'users' => $users]);
 }
 
 function webHandlePlatformCustomerSave(): never
@@ -696,6 +751,8 @@ function webDispatch(): never
             webHandlePlatformPlans();
         case 'platform_customers':
             webHandlePlatformCustomers();
+        case 'platform_customer_details':
+            webHandlePlatformCustomerDetails();
         case 'platform_customer_save':
             webHandlePlatformCustomerSave();
         case 'platform_plan_save':
