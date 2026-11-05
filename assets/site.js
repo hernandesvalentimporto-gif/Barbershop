@@ -63,6 +63,7 @@
         billing_not_ready: 'A estrutura comercial ainda não foi ativada no banco de dados.',
         invalid_plan: 'Confira nome, código, preço, periodicidade e teste do plano.',
         plan_code_exists: 'Já existe um plano com esse código.',
+        invalid_platform_customer: 'Confira os dados da barbearia, do responsável e uma senha com pelo menos 8 caracteres.',
         invalid_checkout_request: 'Informe a barbearia, o plano e um e-mail válido para o checkout.',
         barbershop_not_found: 'Barbearia não encontrada.',
         payment_not_configured: 'O pagamento ainda não está configurado no servidor.',
@@ -690,6 +691,65 @@
             section.append(list);
         }
         content.append(section);
+
+        const customersSection = el('section', { className: 'card section-card' }, [
+            el('h3', { text: 'Clientes comerciais' }),
+            el('p', { className: 'section-description', text: 'Barbearias cadastradas, plano, teste, situação de pagamento e contatos.' })
+        ]);
+        try {
+            const customerResult = await api('platform_customers');
+            const customers = Array.isArray(customerResult.customers) ? customerResult.customers : [];
+            if (!customers.length) {
+                customersSection.append(emptyState('Nenhuma barbearia cadastrada', 'Cadastre o primeiro cliente comercial abaixo.'));
+            } else {
+                const list = el('div', { className: 'record-list' });
+                customers.forEach((customer) => {
+                    const deadline = customer.subscription_status === 'trialing' ? customer.trial_ends_at : customer.current_period_end;
+                    const period = deadline ? `Próximo marco: ${formatUtcDateTime(deadline)}` : 'Sem data de cobrança';
+                    const statusText = { active: 'Pagando', past_due: 'Inadimplente', expired: 'Vencido', trialing: 'Em teste' }[customer.subscription_status] || 'Sem assinatura';
+                    list.append(el('article', { className: 'record-row' }, [
+                        el('div', { className: 'record-main' }, [
+                            el('strong', { text: customer.name }),
+                            el('span', { text: `${customer.phone || 'Sem telefone'} • ${customer.address || 'Endereço não informado'}` }),
+                            el('span', { text: `${customer.plan_name || 'Sem plano'} • ${period}` }),
+                            el('span', { className: 'record-detail', text: `${customer.active_barbers} barbeiro(s) ativo(s) • ${customer.active_clients} cliente(s) ativo(s)` })
+                        ]),
+                        el('div', { className: 'record-secondary' }, [subscriptionPill(customer.subscription_status), el('span', { text: statusText })])
+                    ]));
+                });
+                customersSection.append(list);
+                customersSection.append(el('p', { className: 'field-hint', text: 'Os totais de barbeiros e clientes refletem a base atual do site. O vínculo individual por barbearia será a próxima etapa do isolamento multiempresa.' }));
+            }
+            const customerForm = el('form', { className: 'form-card', novalidate: true, autocomplete: 'off' });
+            const customerName = input('text', 'platform-customer-name', '', { required: true, maxlength: 180, placeholder: 'Nome da barbearia' });
+            const customerPhone = input('tel', 'platform-customer-phone', '', { maxlength: 40, placeholder: '(00) 00000-0000' });
+            const customerAddress = input('text', 'platform-customer-address', '', { maxlength: 255, placeholder: 'Cidade ou endereço' });
+            const ownerName = input('text', 'platform-owner-name', '', { required: true, maxlength: 160, placeholder: 'Nome do responsável' });
+            const ownerEmail = input('email', 'platform-owner-email', '', { required: true, maxlength: 190, placeholder: 'responsavel@exemplo.com' });
+            const ownerPassword = passwordControl('platform-owner-password', { required: true, minlength: 8, maxlength: 4096 });
+            const customerMessage = el('p', { className: 'form-message', role: 'alert', 'aria-live': 'polite' });
+            const customerSubmit = button('Cadastrar cliente comercial', 'button');
+            customerSubmit.type = 'submit';
+            customerForm.append(el('h3', { text: 'Novo cliente comercial' }), el('p', { text: 'Cria a barbearia, a conta do responsável e inicia automaticamente o teste de 30 dias.' }), el('div', { className: 'form-grid' }, [field('Nome da barbearia', customerName), field('Telefone', customerPhone), field('Endereço', customerAddress), field('Responsável', ownerName), field('E-mail de acesso', ownerEmail), field('Senha inicial', ownerPassword, 'Mínimo de 8 caracteres.')]), customerMessage, el('div', { className: 'form-actions' }, [customerSubmit]));
+            customerForm.addEventListener('submit', async (event) => {
+                event.preventDefault();
+                if (!customerForm.reportValidity() || customerSubmit.disabled) return;
+                setButtonBusy(customerSubmit, true, 'Cadastrando...');
+                try {
+                    await api('platform_customer_save', { method: 'POST', body: { name: customerName.value.trim(), phone: customerPhone.value.trim(), address: customerAddress.value.trim(), owner_name: ownerName.value.trim(), owner_email: ownerEmail.value.trim(), owner_password: ownerPassword.querySelector('input').value } });
+                    customerMessage.className = 'form-message success';
+                    customerMessage.textContent = 'Cliente comercial cadastrado e teste de 30 dias iniciado.';
+                    window.setTimeout(() => renderApp(), 650);
+                } catch (error) {
+                    customerMessage.className = 'form-message error';
+                    customerMessage.textContent = friendlyError(error);
+                } finally { setButtonBusy(customerSubmit, false); }
+            });
+            customersSection.append(customerForm);
+        } catch (error) {
+            customersSection.append(pageError(error, () => renderApp()));
+        }
+        content.append(customersSection);
 
         const plansSection = el('section', { className: 'card section-card' }, [
             el('h3', { text: 'Planos e pagamentos' }),

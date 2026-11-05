@@ -155,6 +155,12 @@ img { display: block; max-width: 100%; }
 .split-layout { display: grid; grid-template-columns: minmax(290px, .72fr) minmax(0, 1.28fr); align-items: start; gap: 18px; }
 .records-list { display: grid; gap: 9px; }
 .record-card { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 16px 17px; background: rgba(21, 23, 26, .92); border: 1px solid var(--line-soft); border-radius: 13px; }
+.record-list { display: grid; gap: 10px; }
+.record-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; padding: 16px 17px; background: rgba(21, 23, 26, .92); border: 1px solid var(--line-soft); border-radius: 13px; }
+.record-main { min-width: 0; display: grid; gap: 4px; }
+.record-main strong { overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
+.record-main span { color: var(--muted); font-size: 13px; }
+.record-main .record-detail { color: var(--gold-bright); font-size: 12px; }
 .record-primary { min-width: 0; }
 .record-primary strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .record-primary small { display: block; overflow: hidden; margin-top: 3px; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
@@ -227,6 +233,7 @@ img { display: block; max-width: 100%; }
     .appointment-card { grid-template-columns: 1fr; }
     .appointment-actions { justify-content: flex-start; }
     .record-card { align-items: flex-start; flex-direction: column; }
+    .record-row { grid-template-columns: 1fr; }
     .record-secondary { justify-content: flex-start; }
     .date-toolbar strong { min-width: auto; order: -1; width: 100%; text-align: left; }
     .date-toolbar { width: 100%; }
