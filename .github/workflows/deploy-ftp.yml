@@ -37,6 +37,7 @@ jobs:
             **/.installed
             **/config.example.php
             **/__apply_saas_migration.php
+            **/__apply_tenant_migration.php
             **/.env*
             **/README*.md
             **/TODO.md
