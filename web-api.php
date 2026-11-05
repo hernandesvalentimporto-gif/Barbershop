@@ -65,7 +65,7 @@ function webHandleLogin(): never
     }
 
     [$pdo, $prefix] = webOpenDatabase();
-    $stmt = $pdo->prepare("SELECT id, name, email, password_hash, role, status, platform_admin
+    $stmt = $pdo->prepare("SELECT id, name, email, password_hash, role, status, platform_admin, barbershop_id
         FROM `{$prefix}users` WHERE email = ? LIMIT 1");
     $stmt->execute([$email]);
     $user = $stmt->fetch();
@@ -268,8 +268,8 @@ function webHandlePlatformCustomerSave(): never
         $shop = $pdo->prepare("INSERT INTO `{$prefix}barbershops` (name, phone, address) VALUES (?, ?, ?)");
         $shop->execute([$name, $phone !== '' ? $phone : null, $address !== '' ? $address : null]);
         $barbershopId = (int)$pdo->lastInsertId();
-        $owner = $pdo->prepare("INSERT INTO `{$prefix}users` (name, email, password_hash, role, status, platform_admin) VALUES (?, ?, ?, 'admin', 'active', 0)");
-        $owner->execute([$ownerName, $ownerEmail, password_hash($ownerPassword, PASSWORD_DEFAULT)]);
+        $owner = $pdo->prepare("INSERT INTO `{$prefix}users` (barbershop_id, name, email, password_hash, role, status, platform_admin) VALUES (?, ?, ?, ?, 'admin', 'active', 0)");
+        $owner->execute([$barbershopId, $ownerName, $ownerEmail, password_hash($ownerPassword, PASSWORD_DEFAULT)]);
         $trial = $pdo->prepare("INSERT INTO `{$prefix}subscriptions` (barbershop_id, status, trial_started_at, trial_ends_at) VALUES (?, 'trialing', UTC_TIMESTAMP(), DATE_ADD(UTC_TIMESTAMP(), INTERVAL 30 DAY))");
         $trial->execute([$barbershopId]);
         $pdo->commit();

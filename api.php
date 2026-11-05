@@ -441,7 +441,7 @@ function authenticatedUser(PDO $pdo, string $prefix): array
     }
 
     ensureSessions($pdo, $prefix);
-    $stmt = $pdo->prepare("SELECT u.id, u.name, u.email, u.role, u.status
+    $stmt = $pdo->prepare("SELECT u.id, u.name, u.email, u.role, u.status, u.barbershop_id
         FROM `{$prefix}sessions` s
         INNER JOIN `{$prefix}users` u ON u.id = s.user_id
         WHERE s.token_hash = ? AND s.expires_at > UTC_TIMESTAMP() AND u.status = 'active'
@@ -452,25 +452,42 @@ function authenticatedUser(PDO $pdo, string $prefix): array
         apiError('unauthorized', 401);
     }
     $user['id'] = (int)$user['id'];
+    $user['barbershop_id'] = $user['barbershop_id'] === null ? null : (int)$user['barbershop_id'];
     return $user;
 }
 
-function apiFetchUser(PDO $pdo, string $prefix, int $id): ?array
+function apiTenantId(array $user): int
 {
-    $stmt = $pdo->prepare("SELECT id, name, email, password_hash, role, status FROM `{$prefix}users` WHERE id = ? LIMIT 1");
-    $stmt->execute([$id]);
+    $tenant = apiPositiveId($user['barbershop_id'] ?? null);
+    if ($tenant === null) {
+        apiError('tenant_not_configured', 503);
+    }
+    return $tenant;
+}
+
+function apiFetchUser(PDO $pdo, string $prefix, int $id, ?int $tenantId = null): ?array
+{
+    $sql = "SELECT id, name, email, password_hash, role, status, barbershop_id FROM `{$prefix}users` WHERE id = ?";
+    $params = [$id];
+    if ($tenantId !== null) { $sql .= ' AND barbershop_id = ?'; $params[] = $tenantId; }
+    $sql .= ' LIMIT 1';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
     $user = $stmt->fetch();
     return $user ?: null;
 }
 
-function apiFetchService(PDO $pdo, string $prefix, int $id, bool $forUpdate = false): ?array
+function apiFetchService(PDO $pdo, string $prefix, int $id, bool $forUpdate = false, ?int $tenantId = null): ?array
 {
-    $sql = "SELECT id, name, duration_minutes, price_cents, active, description FROM `{$prefix}services` WHERE id = ? LIMIT 1";
+    $sql = "SELECT id, name, duration_minutes, price_cents, active, description, barbershop_id FROM `{$prefix}services` WHERE id = ?";
+    $params = [$id];
+    if ($tenantId !== null) { $sql .= ' AND barbershop_id = ?'; $params[] = $tenantId; }
+    $sql .= ' LIMIT 1';
     if ($forUpdate) {
         $sql .= ' FOR UPDATE';
     }
     $stmt = $pdo->prepare($sql);
-    $stmt->execute([$id]);
+    $stmt->execute($params);
     $service = $stmt->fetch();
     return $service ?: null;
 }
@@ -525,8 +542,9 @@ function handleUsers(PDO $pdo, string $prefix, array $user): never
         apiError('invalid_search', 422);
     }
 
-    $sql = "SELECT id, name, email, role, status FROM `{$prefix}users` WHERE role IN ('client', 'barber')";
-    $params = [];
+    $tenantId = apiTenantId($user);
+    $sql = "SELECT id, name, email, role, status FROM `{$prefix}users` WHERE barbershop_id = ? AND role IN ('client', 'barber')";
+    $params = [$tenantId];
     if ($role !== '') {
         $sql .= ' AND role = ?';
         $params[] = $role;
@@ -559,6 +577,7 @@ function handleUserSave(PDO $pdo, string $prefix, array $currentUser): never
     if ($currentUser['role'] !== 'admin') {
         apiError('forbidden', 403);
     }
+    $tenantId = apiTenantId($currentUser);
     $data = apiReadBody();
     $id = array_key_exists('id', $data) ? apiPositiveId($data['id']) : null;
     if (array_key_exists('id', $data) && $id === null) {
@@ -567,7 +586,7 @@ function handleUserSave(PDO $pdo, string $prefix, array $currentUser): never
 
     $existing = [];
     if ($id !== null) {
-        $existing = apiFetchUser($pdo, $prefix, $id) ?? [];
+        $existing = apiFetchUser($pdo, $prefix, $id, $tenantId) ?? [];
         if (!$existing) {
             apiError('user_not_found', 404);
         }
@@ -580,16 +599,17 @@ function handleUserSave(PDO $pdo, string $prefix, array $currentUser): never
     if (!$validated['ok']) {
         apiError((string)$validated['error'], 422);
     }
-    $duplicate = $pdo->prepare("SELECT id FROM `{$prefix}users` WHERE email = ? AND id <> ? LIMIT 1");
-    $duplicate->execute([$validated['email'], $id ?? 0]);
+    $duplicate = $pdo->prepare("SELECT id FROM `{$prefix}users` WHERE email = ? AND id <> ? AND barbershop_id = ? LIMIT 1");
+    $duplicate->execute([$validated['email'], $id ?? 0, $tenantId]);
     if ($duplicate->fetchColumn() !== false) {
         apiError('email_already_exists', 409);
     }
 
     try {
         if ($id === null) {
-            $stmt = $pdo->prepare("INSERT INTO `{$prefix}users` (name, email, password_hash, role, status) VALUES (?, ?, ?, ?, ?)");
+            $stmt = $pdo->prepare("INSERT INTO `{$prefix}users` (barbershop_id, name, email, password_hash, role, status) VALUES (?, ?, ?, ?, ?, ?)");
             $stmt->execute([
+                $tenantId,
                 $validated['name'],
                 $validated['email'],
                 password_hash((string)$validated['password'], PASSWORD_DEFAULT),
@@ -605,7 +625,8 @@ function handleUserSave(PDO $pdo, string $prefix, array $currentUser): never
                 $params[] = password_hash((string)$validated['password'], PASSWORD_DEFAULT);
             }
             $params[] = $id;
-            $stmt = $pdo->prepare("UPDATE `{$prefix}users` SET " . implode(', ', $fields) . " WHERE id = ? AND role IN ('client', 'barber')");
+            $stmt = $pdo->prepare("UPDATE `{$prefix}users` SET " . implode(', ', $fields) . " WHERE id = ? AND barbershop_id = ? AND role IN ('client', 'barber')");
+            $params[] = $tenantId;
             $stmt->execute($params);
         }
     } catch (PDOException $exception) {
@@ -615,7 +636,7 @@ function handleUserSave(PDO $pdo, string $prefix, array $currentUser): never
         throw $exception;
     }
 
-    $saved = apiFetchUser($pdo, $prefix, (int)$id);
+    $saved = apiFetchUser($pdo, $prefix, (int)$id, $tenantId);
     if (!$saved || (string)$saved['role'] === 'admin') {
         apiError('user_not_found', 404);
     }
@@ -634,13 +655,15 @@ function handleUserSave(PDO $pdo, string $prefix, array $currentUser): never
 function handleServices(PDO $pdo, string $prefix, array $user): never
 {
     apiRequireMethod('GET');
+    $tenantId = apiTenantId($user);
     $activeOnly = $user['role'] !== 'admin';
-    $sql = "SELECT id, name, duration_minutes, price_cents, active, description FROM `{$prefix}services`";
+    $sql = "SELECT id, name, duration_minutes, price_cents, active, description FROM `{$prefix}services` WHERE barbershop_id = ?";
+    $params = [$tenantId];
     if ($activeOnly) {
-        $sql .= ' WHERE active = 1';
+        $sql .= ' AND active = 1';
     }
     $sql .= ' ORDER BY name ASC, id ASC';
-    $rows = $pdo->query($sql)->fetchAll();
+    $stmt = $pdo->prepare($sql); $stmt->execute($params); $rows = $stmt->fetchAll();
     $services = [];
     foreach ($rows as $row) {
         $services[] = apiServiceResponse($row);
@@ -654,6 +677,7 @@ function handleServiceSave(PDO $pdo, string $prefix, array $currentUser): never
     if ($currentUser['role'] !== 'admin') {
         apiError('forbidden', 403);
     }
+    $tenantId = apiTenantId($currentUser);
     $data = apiReadBody();
     $id = array_key_exists('id', $data) ? apiPositiveId($data['id']) : null;
     if (array_key_exists('id', $data) && $id === null) {
@@ -661,7 +685,7 @@ function handleServiceSave(PDO $pdo, string $prefix, array $currentUser): never
     }
     $existing = [];
     if ($id !== null) {
-        $existing = apiFetchService($pdo, $prefix, $id) ?? [];
+        $existing = apiFetchService($pdo, $prefix, $id, false, $tenantId) ?? [];
         if (!$existing) {
             apiError('service_not_found', 404);
         }
@@ -672,8 +696,9 @@ function handleServiceSave(PDO $pdo, string $prefix, array $currentUser): never
     }
 
     if ($id === null) {
-        $stmt = $pdo->prepare("INSERT INTO `{$prefix}services` (name, duration_minutes, price_cents, active, description) VALUES (?, ?, ?, ?, ?)");
+        $stmt = $pdo->prepare("INSERT INTO `{$prefix}services` (barbershop_id, name, duration_minutes, price_cents, active, description) VALUES (?, ?, ?, ?, ?, ?)");
         $stmt->execute([
+            $tenantId,
             $validated['name'],
             $validated['duration_minutes'],
             $validated['price_cents'],
@@ -682,7 +707,7 @@ function handleServiceSave(PDO $pdo, string $prefix, array $currentUser): never
         ]);
         $id = (int)$pdo->lastInsertId();
     } else {
-        $stmt = $pdo->prepare("UPDATE `{$prefix}services` SET name = ?, duration_minutes = ?, price_cents = ?, active = ?, description = ? WHERE id = ?");
+        $stmt = $pdo->prepare("UPDATE `{$prefix}services` SET name = ?, duration_minutes = ?, price_cents = ?, active = ?, description = ? WHERE id = ? AND barbershop_id = ?");
         $stmt->execute([
             $validated['name'],
             $validated['duration_minutes'],
@@ -690,9 +715,10 @@ function handleServiceSave(PDO $pdo, string $prefix, array $currentUser): never
             $validated['active'],
             $validated['description'],
             $id,
+            $tenantId,
         ]);
     }
-    $saved = apiFetchService($pdo, $prefix, (int)$id);
+    $saved = apiFetchService($pdo, $prefix, (int)$id, false, $tenantId);
     if (!$saved) {
         apiError('service_not_found', 404);
     }
@@ -700,14 +726,14 @@ function handleServiceSave(PDO $pdo, string $prefix, array $currentUser): never
 }
 
 /** @return array<int, array<string, mixed>> */
-function apiLockUsers(PDO $pdo, string $prefix, array $ids): array
+function apiLockUsers(PDO $pdo, string $prefix, array $ids, int $tenantId): array
 {
     $ids = array_values(array_unique(array_map('intval', $ids)));
     sort($ids, SORT_NUMERIC);
     $locked = [];
     foreach ($ids as $id) {
-        $stmt = $pdo->prepare("SELECT id, role, status FROM `{$prefix}users` WHERE id = ? LIMIT 1 FOR UPDATE");
-        $stmt->execute([$id]);
+        $stmt = $pdo->prepare("SELECT id, role, status FROM `{$prefix}users` WHERE id = ? AND barbershop_id = ? LIMIT 1 FOR UPDATE");
+        $stmt->execute([$id, $tenantId]);
         $row = $stmt->fetch();
         if ($row) {
             $locked[(int)$row['id']] = $row;
@@ -734,6 +760,7 @@ function apiAppointmentNotes(mixed $value): ?string
 function handleAppointmentCreate(PDO $pdo, string $prefix, array $currentUser): never
 {
     apiRequireMethod('POST');
+    $tenantId = apiTenantId($currentUser);
     $data = apiReadBody();
     $serviceId = apiPositiveId($data['service_id'] ?? null);
     if ($serviceId === null) {
@@ -793,7 +820,7 @@ function handleAppointmentCreate(PDO $pdo, string $prefix, array $currentUser): 
         $pdo->beginTransaction();
         // Every create locks the two user rows in ascending id order. This
         // serializes competing inserts for both barber and client bookings.
-        $lockedUsers = apiLockUsers($pdo, $prefix, [(int)$clientId, (int)$barberId]);
+        $lockedUsers = apiLockUsers($pdo, $prefix, [(int)$clientId, (int)$barberId], $tenantId);
         $client = $lockedUsers[(int)$clientId] ?? null;
         $barber = $lockedUsers[(int)$barberId] ?? null;
         if (!$client || $client['role'] !== 'client' || $client['status'] !== 'active') {
@@ -804,7 +831,7 @@ function handleAppointmentCreate(PDO $pdo, string $prefix, array $currentUser): 
         }
 
         // Lock the service row for a consistent duration while calculating and inserting.
-        $service = apiFetchService($pdo, $prefix, (int)$serviceId, true);
+        $service = apiFetchService($pdo, $prefix, (int)$serviceId, true, $tenantId);
         if (!$service || (int)$service['active'] !== 1) {
             apiRollbackAndError($pdo, 'service_not_found', 404);
         }
@@ -815,27 +842,28 @@ function handleAppointmentCreate(PDO $pdo, string $prefix, array $currentUser): 
         }
 
         $conflict = $pdo->prepare("SELECT id FROM `{$prefix}appointments`
-            WHERE barber_id = ? AND status IN ('pending', 'confirmed')
+            WHERE barbershop_id = ? AND barber_id = ? AND status IN ('pending', 'confirmed')
               AND starts_at < ? AND ends_at > ?
             LIMIT 1");
-        $conflict->execute([(int)$barberId, $window['ends_at'], $window['starts_at']]);
+        $conflict->execute([$tenantId, (int)$barberId, $window['ends_at'], $window['starts_at']]);
         if ($conflict->fetch()) {
             apiRollbackAndError($pdo, 'appointment_conflict', 409);
         }
 
         $clientConflict = $pdo->prepare("SELECT id FROM `{$prefix}appointments`
-            WHERE client_id = ? AND status IN ('pending', 'confirmed')
+            WHERE barbershop_id = ? AND client_id = ? AND status IN ('pending', 'confirmed')
               AND starts_at < ? AND ends_at > ?
             LIMIT 1");
-        $clientConflict->execute([(int)$clientId, $window['ends_at'], $window['starts_at']]);
+        $clientConflict->execute([$tenantId, (int)$clientId, $window['ends_at'], $window['starts_at']]);
         if ($clientConflict->fetch()) {
             apiRollbackAndError($pdo, 'client_appointment_conflict', 409);
         }
 
         $insert = $pdo->prepare("INSERT INTO `{$prefix}appointments`
-            (client_id, barber_id, service_id, starts_at, ends_at, status, notes)
-            VALUES (?, ?, ?, ?, ?, 'pending', ?)");
+            (barbershop_id, client_id, barber_id, service_id, starts_at, ends_at, status, notes)
+            VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)");
         $insert->execute([
+            $tenantId,
             (int)$clientId,
             (int)$barberId,
             (int)$serviceId,
@@ -858,17 +886,18 @@ function handleAppointmentCreate(PDO $pdo, string $prefix, array $currentUser): 
 function handleAppointmentCancel(PDO $pdo, string $prefix, array $user): never
 {
     apiRequireMethod('POST');
+    $tenantId = apiTenantId($user);
     $id = apiPositiveId(apiReadBody()['appointment_id'] ?? null);
     if ($id === null) {
         apiError('invalid_appointment', 422);
     }
     if ($user['role'] === 'admin') {
-        $stmt = $pdo->prepare("UPDATE `{$prefix}appointments` SET status = 'cancelled' WHERE id = ? AND status IN ('pending', 'confirmed')");
-        $stmt->execute([$id]);
+        $stmt = $pdo->prepare("UPDATE `{$prefix}appointments` SET status = 'cancelled' WHERE id = ? AND barbershop_id = ? AND status IN ('pending', 'confirmed')");
+        $stmt->execute([$id, $tenantId]);
     } else {
         $stmt = $pdo->prepare("UPDATE `{$prefix}appointments` SET status = 'cancelled'
-            WHERE id = ? AND status IN ('pending', 'confirmed') AND (client_id = ? OR barber_id = ?)");
-        $stmt->execute([$id, (int)$user['id'], (int)$user['id']]);
+            WHERE id = ? AND barbershop_id = ? AND status IN ('pending', 'confirmed') AND (client_id = ? OR barber_id = ?)");
+        $stmt->execute([$id, $tenantId, (int)$user['id'], (int)$user['id']]);
     }
     if ($stmt->rowCount() < 1) {
         apiError('appointment_not_found', 404);
@@ -879,6 +908,7 @@ function handleAppointmentCancel(PDO $pdo, string $prefix, array $user): never
 function handleAppointmentStatus(PDO $pdo, string $prefix, array $user): never
 {
     apiRequireMethod('POST');
+    $tenantId = apiTenantId($user);
     $data = apiReadBody();
     $id = apiPositiveId($data['appointment_id'] ?? null);
     $status = is_string($data['status'] ?? null) ? trim((string)$data['status']) : '';
@@ -887,8 +917,8 @@ function handleAppointmentStatus(PDO $pdo, string $prefix, array $user): never
     }
     try {
         $pdo->beginTransaction();
-        $stmt = $pdo->prepare("SELECT id, barber_id, status FROM `{$prefix}appointments` WHERE id = ? LIMIT 1 FOR UPDATE");
-        $stmt->execute([$id]);
+        $stmt = $pdo->prepare("SELECT id, barber_id, status FROM `{$prefix}appointments` WHERE id = ? AND barbershop_id = ? LIMIT 1 FOR UPDATE");
+        $stmt->execute([$id, $tenantId]);
         $appointment = $stmt->fetch();
         if (!$appointment) {
             apiRollbackAndError($pdo, 'appointment_not_found', 404);
@@ -905,8 +935,8 @@ function handleAppointmentStatus(PDO $pdo, string $prefix, array $user): never
         if (!isset($transitions[$current]) || !in_array($status, $transitions[$current], true)) {
             apiRollbackAndError($pdo, 'invalid_status_transition', 409);
         }
-        $update = $pdo->prepare("UPDATE `{$prefix}appointments` SET status = ? WHERE id = ?");
-        $update->execute([$status, $id]);
+        $update = $pdo->prepare("UPDATE `{$prefix}appointments` SET status = ? WHERE id = ? AND barbershop_id = ?");
+        $update->execute([$status, $id, $tenantId]);
         $pdo->commit();
     } catch (Throwable $exception) {
         if ($pdo->inTransaction()) {
@@ -920,6 +950,7 @@ function handleAppointmentStatus(PDO $pdo, string $prefix, array $user): never
 function handleAppointmentList(PDO $pdo, string $prefix, array $user): never
 {
     apiRequireMethod('GET');
+    $tenantId = apiTenantId($user);
     $dateValue = $_GET['date'] ?? null;
     if (!is_string($dateValue)) {
         apiError('invalid_date', 422);
@@ -935,8 +966,8 @@ function handleAppointmentList(PDO $pdo, string $prefix, array $user): never
         LEFT JOIN `{$prefix}users` c ON c.id = a.client_id
         LEFT JOIN `{$prefix}users` b ON b.id = a.barber_id
         LEFT JOIN `{$prefix}services` s ON s.id = a.service_id
-        WHERE a.starts_at >= ? AND a.starts_at < ?";
-    $params = [$date->format('Y-m-d 00:00:00'), $nextDate->format('Y-m-d 00:00:00')];
+        WHERE a.barbershop_id = ? AND a.starts_at >= ? AND a.starts_at < ?";
+    $params = [$tenantId, $date->format('Y-m-d 00:00:00'), $nextDate->format('Y-m-d 00:00:00')];
     if ($user['role'] === 'barber') {
         $sql .= ' AND a.barber_id = ?';
         $params[] = (int)$user['id'];
@@ -954,11 +985,14 @@ function handleAppointmentList(PDO $pdo, string $prefix, array $user): never
     jsonResponse(['ok' => true, 'appointments' => $appointments]);
 }
 
-function handleCatalog(PDO $pdo, string $prefix): never
+function handleCatalog(PDO $pdo, string $prefix, array $user): never
 {
     apiRequireMethod('GET');
-    $services = $pdo->query("SELECT id, name, duration_minutes, price_cents FROM `{$prefix}services` WHERE active = 1 ORDER BY name ASC, id ASC")->fetchAll();
-    $barbers = $pdo->query("SELECT id, name FROM `{$prefix}users` WHERE role = 'barber' AND status = 'active' ORDER BY name ASC, id ASC")->fetchAll();
+    $tenantId = apiTenantId($user);
+    $stmt = $pdo->prepare("SELECT id, name, duration_minutes, price_cents FROM `{$prefix}services` WHERE barbershop_id = ? AND active = 1 ORDER BY name ASC, id ASC");
+    $stmt->execute([$tenantId]); $services = $stmt->fetchAll();
+    $stmt = $pdo->prepare("SELECT id, name FROM `{$prefix}users` WHERE barbershop_id = ? AND role = 'barber' AND status = 'active' ORDER BY name ASC, id ASC");
+    $stmt->execute([$tenantId]); $barbers = $stmt->fetchAll();
     foreach ($services as &$service) {
         $service['id'] = (int)$service['id'];
         $service['duration_minutes'] = (int)$service['duration_minutes'];
@@ -975,6 +1009,7 @@ function handleCatalog(PDO $pdo, string $prefix): never
 function handleAvailability(PDO $pdo, string $prefix, array $user): never
 {
     apiRequireMethod('GET');
+    $tenantId = apiTenantId($user);
     $dateValue = $_GET['date'] ?? null;
     $barberId = apiPositiveId($_GET['barber_id'] ?? null);
     $serviceId = apiPositiveId($_GET['service_id'] ?? null);
@@ -986,12 +1021,12 @@ function handleAvailability(PDO $pdo, string $prefix, array $user): never
         apiError('invalid_availability', 422);
     }
 
-    $barberStmt = $pdo->prepare("SELECT id FROM `{$prefix}users` WHERE id = ? AND role = 'barber' AND status = 'active' LIMIT 1");
-    $barberStmt->execute([$barberId]);
+    $barberStmt = $pdo->prepare("SELECT id FROM `{$prefix}users` WHERE id = ? AND barbershop_id = ? AND role = 'barber' AND status = 'active' LIMIT 1");
+    $barberStmt->execute([$barberId, $tenantId]);
     if ($barberStmt->fetchColumn() === false) {
         apiError('barber_not_found', 404);
     }
-    $service = apiFetchService($pdo, $prefix, $serviceId);
+    $service = apiFetchService($pdo, $prefix, $serviceId, false, $tenantId);
     if (!$service || (int)$service['active'] !== 1) {
         apiError('service_not_found', 404);
     }
@@ -1002,10 +1037,10 @@ function handleAvailability(PDO $pdo, string $prefix, array $user): never
 
     $nextDate = $date->modify('+1 day');
     $appointments = $pdo->prepare("SELECT starts_at, ends_at FROM `{$prefix}appointments`
-        WHERE barber_id = ? AND status IN ('pending', 'confirmed')
+        WHERE barbershop_id = ? AND barber_id = ? AND status IN ('pending', 'confirmed')
           AND starts_at < ? AND ends_at > ?");
     $appointments->execute([
-        $barberId,
+        $tenantId, $barberId,
         $nextDate->format('Y-m-d 00:00:00'),
         $date->format('Y-m-d 00:00:00'),
     ]);
@@ -1036,6 +1071,7 @@ function handleAvailability(PDO $pdo, string $prefix, array $user): never
 function handleSummary(PDO $pdo, string $prefix, array $user): never
 {
     apiRequireMethod('GET');
+    $tenantId = apiTenantId($user);
     $today = new DateTimeImmutable('today', apiTimezone());
     $tomorrow = $today->modify('+1 day');
     $todayStart = $today->format('Y-m-d 00:00:00');
@@ -1044,14 +1080,15 @@ function handleSummary(PDO $pdo, string $prefix, array $user): never
 
     if ($user['role'] === 'admin') {
         $counts = ['admin' => 0, 'barber' => 0, 'client' => 0];
-        $rows = $pdo->query("SELECT role, COUNT(*) AS total FROM `{$prefix}users` WHERE status = 'active' GROUP BY role")->fetchAll();
+        $stmt = $pdo->prepare("SELECT role, COUNT(*) AS total FROM `{$prefix}users` WHERE barbershop_id = ? AND status = 'active' GROUP BY role");
+        $stmt->execute([$tenantId]); $rows = $stmt->fetchAll();
         foreach ($rows as $row) {
             if (array_key_exists((string)$row['role'], $counts)) {
                 $counts[(string)$row['role']] = (int)$row['total'];
             }
         }
-        $appointmentCount = $pdo->prepare("SELECT COUNT(*) FROM `{$prefix}appointments` WHERE starts_at >= ? AND starts_at < ?");
-        $appointmentCount->execute([$todayStart, $tomorrowStart]);
+        $appointmentCount = $pdo->prepare("SELECT COUNT(*) FROM `{$prefix}appointments` WHERE barbershop_id = ? AND starts_at >= ? AND starts_at < ?");
+        $appointmentCount->execute([$tenantId, $todayStart, $tomorrowStart]);
         $response['data'] = [
             // Keep the old users key, but make all role counts explicit and real.
             'users' => $counts['admin'] + $counts['barber'] + $counts['client'],
@@ -1062,17 +1099,17 @@ function handleSummary(PDO $pdo, string $prefix, array $user): never
         ];
     } elseif ($user['role'] === 'barber') {
         $stmt = $pdo->prepare("SELECT COUNT(*) FROM `{$prefix}appointments`
-            WHERE barber_id = ? AND starts_at >= ? AND starts_at < ? AND status IN ('pending', 'confirmed')");
-        $stmt->execute([(int)$user['id'], $todayStart, $tomorrowStart]);
+            WHERE barbershop_id = ? AND barber_id = ? AND starts_at >= ? AND starts_at < ? AND status IN ('pending', 'confirmed')");
+        $stmt->execute([$tenantId, (int)$user['id'], $todayStart, $tomorrowStart]);
         $response['data']['today_appointments'] = (int)$stmt->fetchColumn();
         $list = $pdo->prepare("SELECT a.id, a.starts_at, a.ends_at, a.status,
             u.name AS client_name, s.name AS service_name
             FROM `{$prefix}appointments` a
             LEFT JOIN `{$prefix}users` u ON u.id = a.client_id
             LEFT JOIN `{$prefix}services` s ON s.id = a.service_id
-            WHERE a.barber_id = ? AND a.starts_at >= ?
+            WHERE a.barbershop_id = ? AND a.barber_id = ? AND a.starts_at >= ?
             ORDER BY a.starts_at ASC, a.id ASC LIMIT 20");
-        $list->execute([(int)$user['id'], $todayStart]);
+        $list->execute([$tenantId, (int)$user['id'], $todayStart]);
         $response['data']['appointments'] = $list->fetchAll();
     } else {
         $now = (new DateTimeImmutable('now', apiTimezone()))->format('Y-m-d H:i:s');
@@ -1081,9 +1118,9 @@ function handleSummary(PDO $pdo, string $prefix, array $user): never
             FROM `{$prefix}appointments` a
             LEFT JOIN `{$prefix}users` u ON u.id = a.barber_id
             LEFT JOIN `{$prefix}services` s ON s.id = a.service_id
-            WHERE a.client_id = ? AND a.starts_at >= ? AND a.status IN ('pending', 'confirmed')
+            WHERE a.barbershop_id = ? AND a.client_id = ? AND a.starts_at >= ? AND a.status IN ('pending', 'confirmed')
             ORDER BY a.starts_at ASC, a.id ASC LIMIT 5");
-        $stmt->execute([(int)$user['id'], $now]);
+        $stmt->execute([$tenantId, (int)$user['id'], $now]);
         $response['data']['upcoming'] = $stmt->fetchAll();
     }
     jsonResponse($response);
@@ -1092,13 +1129,14 @@ function handleSummary(PDO $pdo, string $prefix, array $user): never
 function handleHistory(PDO $pdo, string $prefix, array $user): never
 {
     apiRequireMethod('GET');
+    $tenantId = apiTenantId($user);
     $stmt = $pdo->prepare("SELECT a.id, a.starts_at, a.ends_at, a.status,
         u.name AS barber_name, s.name AS service_name
         FROM `{$prefix}appointments` a
         LEFT JOIN `{$prefix}users` u ON u.id = a.barber_id
         LEFT JOIN `{$prefix}services` s ON s.id = a.service_id
-        WHERE a.client_id = ? ORDER BY a.starts_at DESC, a.id DESC LIMIT 50");
-    $stmt->execute([(int)$user['id']]);
+        WHERE a.barbershop_id = ? AND a.client_id = ? ORDER BY a.starts_at DESC, a.id DESC LIMIT 50");
+    $stmt->execute([$tenantId, (int)$user['id']]);
     jsonResponse(['ok' => true, 'appointments' => $stmt->fetchAll()]);
 }
 
@@ -1171,7 +1209,7 @@ function runApi(): never
             if ($email === '' || apiStringLength($email) > 190 || filter_var($email, FILTER_VALIDATE_EMAIL) === false || $password === '' || strlen($password) > 4096) {
                 apiError('invalid_credentials', 422);
             }
-            $stmt = $pdo->prepare("SELECT id, name, email, password_hash, role, status FROM `{$prefix}users` WHERE email = ? LIMIT 1");
+            $stmt = $pdo->prepare("SELECT id, name, email, password_hash, role, status, barbershop_id FROM `{$prefix}users` WHERE email = ? LIMIT 1");
             $stmt->execute([$email]);
             $loginUser = $stmt->fetch();
             if (!$loginUser || $loginUser['status'] !== 'active' || !password_verify($password, (string)$loginUser['password_hash'])) {
@@ -1230,7 +1268,7 @@ function runApi(): never
             handleAppointmentList($pdo, $prefix, $user);
         }
         if ($action === 'catalog') {
-            handleCatalog($pdo, $prefix);
+            handleCatalog($pdo, $prefix, $user);
         }
         if ($action === 'availability') {
             handleAvailability($pdo, $prefix, $user);
