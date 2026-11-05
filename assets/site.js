@@ -320,7 +320,7 @@
             ['home', 'Início', 'IN'], ['agenda', 'Agenda', 'AG'], ['services', 'Serviços', 'SV'], ['account', 'Conta', 'CT'], ['more', 'Mais', '…']
         ];
         return [
-            ['home', 'Início', 'IN'], ['booking', 'Agendar', 'AG'], ['history', 'Histórico', 'HI'], ['account', 'Conta', 'CT'], ['more', 'Mais', '…']
+            ['home', 'Início', 'IN'], ['agenda', 'Agenda', 'AG'], ['booking', 'Agendar', '＋'], ['history', 'Histórico', 'HI'], ['account', 'Conta', 'CT']
         ];
     }
 
@@ -330,7 +330,7 @@
             ['home', 'Início', 'IN'], ['agenda', 'Agenda', 'AG'], ['clients', 'Clientes', 'CL'], ['team', 'Equipe', 'EQ'], ['services', 'Serviços', 'SV'], ['account', 'Conta', 'CT']
         ];
         if (role === 'barber') return [['home', 'Início', 'IN'], ['agenda', 'Agenda', 'AG'], ['services', 'Serviços', 'SV'], ['account', 'Conta', 'CT']];
-        return [['home', 'Início', 'IN'], ['booking', 'Agendar', 'AG'], ['history', 'Histórico', 'HI'], ['account', 'Conta', 'CT']];
+        return [['home', 'Início', 'IN'], ['agenda', 'Agenda', 'AG'], ['booking', 'Agendar', '＋'], ['history', 'Histórico', 'HI'], ['account', 'Conta', 'CT']];
     }
 
     function navigate(view, replace = false) {
@@ -595,7 +595,7 @@
     }
 
     async function renderAuthenticated() {
-        const validViews = state.user.platform_admin ? ['platform', 'account'] : state.user.role === 'admin' ? ['home', 'agenda', 'clients', 'team', 'services', 'account'] : state.user.role === 'barber' ? ['home', 'agenda', 'services', 'account'] : ['home', 'booking', 'history', 'account'];
+        const validViews = state.user.platform_admin ? ['platform', 'account'] : state.user.role === 'admin' ? ['home', 'agenda', 'clients', 'team', 'services', 'account'] : state.user.role === 'barber' ? ['home', 'agenda', 'services', 'account'] : ['home', 'agenda', 'booking', 'history', 'account'];
         if (!validViews.includes(state.view)) {
             state.view = 'home';
             const url = new URL(window.location.href);
@@ -958,9 +958,19 @@
         });
     }
 
+    function calendarEvent(item, role) {
+        const parsed = dateFromApi(item.starts_at);
+        const event = el('div', { className: `calendar-event ${item.status || 'pending'}` }, [
+            el('div', { className: 'calendar-time' }, [el('strong', { text: parsed.time || '—' }), el('span', { text: formatTime(item.ends_at) })]),
+            appointmentCard(item, role)
+        ]);
+        return event;
+    }
+
     async function renderAgenda(content) {
         const isAdmin = state.user.role === 'admin';
         const isBarber = state.user.role === 'barber';
+        const isClient = state.user.role === 'client';
         const date = state.agendaDate;
         let result;
         try {
@@ -972,8 +982,8 @@
             return;
         }
         clear(content);
-        const newButton = isAdmin ? button('Novo atendimento', 'button') : null;
-        content.append(pageIntro('Agenda', isAdmin ? 'Consulte a operação por dia e crie novos atendimentos com horários disponíveis.' : 'Sua agenda própria, com os status autorizados para atualização.', newButton ? [newButton] : []));
+        const newButton = isAdmin ? button('＋ Novo atendimento', 'button') : isClient ? button('＋ Agendar horário', 'button') : null;
+        content.append(pageIntro('Agenda', isAdmin ? 'Uma visão diária dos atendimentos da barbearia.' : isBarber ? 'Seus atendimentos organizados por horário.' : 'Seus horários confirmados e pendentes, organizados como uma agenda.', newButton ? [newButton] : []));
         const toolbar = el('div', { className: 'toolbar' });
         const dateInput = input('date', 'agenda-date', date, { max: '', 'aria-label': 'Data da agenda' });
         const dateGroup = el('div', { className: 'date-toolbar' }, [
@@ -987,10 +997,15 @@
         toolbar.append(dateGroup);
         content.append(toolbar);
         const appointments = Array.isArray(result.appointments) ? result.appointments : [];
-        const list = el('section', { className: 'appointment-list', 'aria-label': 'Atendimentos do dia' });
-        if (!appointments.length) list.append(emptyState('Nenhum atendimento nesta data', 'Não há registros reais para o dia escolhido.'));
-        else appointments.forEach((item) => list.append(appointmentCard(item, isAdmin ? 'admin' : 'barber')));
-        content.append(list);
+        const calendar = el('section', { className: 'calendar-day', 'aria-label': `Agenda de ${displayDate(date, true)}` }, [
+            el('div', { className: 'calendar-day-heading' }, [
+                el('div', { className: 'calendar-date-badge' }, [el('span', { text: new Intl.DateTimeFormat('pt-BR', { weekday: 'short', timeZone: 'UTC' }).format(new Date(`${date}T12:00:00Z`)).replace('.', '') }), el('strong', { text: date.slice(8, 10) })]),
+                el('div', {}, [el('strong', { text: displayDate(date, true) }), el('span', { text: appointments.length ? `${appointments.length} atendimento(s)` : 'Nenhum evento agendado' })])
+            ])
+        ]);
+        if (!appointments.length) calendar.append(emptyState('Nenhum atendimento nesta data', isClient ? 'Toque em “Agendar horário” para criar seu próximo horário.' : 'Não há registros reais para o dia escolhido.'));
+        else appointments.forEach((item) => calendar.append(calendarEvent(item, isClient ? 'client' : isAdmin ? 'admin' : 'barber')));
+        content.append(calendar);
         wireStatusButtons(content);
         if (isAdmin) {
             const panel = el('section', { id: 'admin-booking-panel', className: 'card form-card', hidden: true });
@@ -1006,6 +1021,8 @@
                     newButton.textContent = 'Novo atendimento';
                 }
             });
+        } else if (isClient && newButton) {
+            newButton.addEventListener('click', () => navigate('booking'));
         }
     }
 

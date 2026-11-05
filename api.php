@@ -920,9 +920,6 @@ function handleAppointmentStatus(PDO $pdo, string $prefix, array $user): never
 function handleAppointmentList(PDO $pdo, string $prefix, array $user): never
 {
     apiRequireMethod('GET');
-    if ($user['role'] === 'client') {
-        apiError('forbidden', 403);
-    }
     $dateValue = $_GET['date'] ?? null;
     if (!is_string($dateValue)) {
         apiError('invalid_date', 422);
@@ -942,6 +939,9 @@ function handleAppointmentList(PDO $pdo, string $prefix, array $user): never
     $params = [$date->format('Y-m-d 00:00:00'), $nextDate->format('Y-m-d 00:00:00')];
     if ($user['role'] === 'barber') {
         $sql .= ' AND a.barber_id = ?';
+        $params[] = (int)$user['id'];
+    } elseif ($user['role'] === 'client') {
+        $sql .= ' AND a.client_id = ?';
         $params[] = (int)$user['id'];
     }
     $sql .= ' ORDER BY a.starts_at ASC, a.id ASC';
