@@ -200,9 +200,12 @@ img { display: block; max-width: 100%; }
 .profile-details div { display: flex; justify-content: space-between; gap: 14px; color: var(--muted); font-size: 13px; }
 .profile-details strong { color: var(--text); text-align: right; text-transform: capitalize; }
 
-.more-menu { position: fixed; z-index: 30; top: 66px; right: 20px; width: min(240px, calc(100vw - 40px)); padding: 8px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 13px; box-shadow: var(--shadow); }
-.more-menu button { display: block; width: 100%; padding: 10px; border: 0; border-radius: 8px; color: var(--text); background: transparent; text-align: left; }
-.more-menu button:hover { background: rgba(231, 185, 78, .1); }
+.more-menu { position: fixed; z-index: 30; top: 66px; right: 20px; width: min(330px, calc(100vw - 40px)); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; padding: 13px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 15px; box-shadow: var(--shadow); }
+.more-menu-title { grid-column: 1 / -1; padding: 2px 4px 6px; color: var(--muted); font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+.more-menu-item { display: flex; align-items: center; gap: 8px; min-height: 49px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; color: var(--text); background: var(--surface-3); text-align: left; font-weight: 700; }
+.more-menu-item:hover { color: var(--gold-bright); border-color: var(--gold-dark); background: rgba(231, 185, 78, .1); }
+.more-menu-symbol { display: inline-grid; place-items: center; width: 22px; color: var(--gold); font-size: 11px; font-weight: 900; }
+.more-menu-close { grid-column: 1 / -1; }
 .mobile-nav { display: none; }
 .toast { position: fixed; z-index: 40; right: 22px; bottom: 22px; max-width: min(440px, calc(100vw - 44px)); padding: 13px 16px; border: 1px solid rgba(104, 203, 155, .35); border-radius: 11px; color: #c5f5d8; background: #14251d; box-shadow: var(--shadow); font-size: 13px; }
 .toast.error { border-color: rgba(238, 133, 133, .38); color: #ffd1d1; background: #2a1717; }
@@ -230,6 +233,7 @@ img { display: block; max-width: 100%; }
     .mobile-nav-item { min-width: 0; flex-direction: column; justify-content: center; gap: 2px; padding: 7px 2px; border-radius: 9px; text-align: center; }
     .mobile-nav-item .nav-label { overflow: hidden; max-width: 100%; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
     .mobile-nav-item .nav-symbol { height: 18px; }
+    .more-menu { top: auto; right: 12px; bottom: calc(76px + env(safe-area-inset-bottom)); left: 12px; width: auto; }
     .topbar-actions .button { min-height: 37px; padding: 8px 10px; font-size: 12px; }
 }
 

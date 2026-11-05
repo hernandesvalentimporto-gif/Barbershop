@@ -360,13 +360,21 @@
         const old = document.getElementById('more-menu');
         if (old) { old.remove(); return; }
         const role = state.user ? state.user.role : 'client';
-        const menu = el('div', { id: 'more-menu', className: 'more-menu', role: 'menu' });
-        const options = role === 'admin' ? [['team', 'Equipe'], ['account', 'Minha conta']] : role === 'barber' ? [['account', 'Minha conta']] : [['account', 'Minha conta']];
-        options.forEach(([view, label]) => {
-            const item = button(label, '', () => { menu.remove(); navigate(view); });
+        const menu = el('div', { id: 'more-menu', className: 'more-menu', role: 'menu' }, [
+            el('div', { className: 'more-menu-title', text: 'Mais opções' })
+        ]);
+        const options = role === 'admin'
+            ? [['clients', 'Clientes', 'CL'], ['team', 'Equipe', 'EQ'], ['services', 'Serviços', 'SV'], ['account', 'Minha conta', 'CT']]
+            : role === 'barber'
+                ? [['services', 'Serviços', 'SV'], ['account', 'Minha conta', 'CT']]
+                : [['account', 'Minha conta', 'CT']];
+        options.forEach(([view, label, symbol]) => {
+            const item = button('', 'more-menu-item', () => { menu.remove(); navigate(view); });
+            item.append(el('span', { className: 'more-menu-symbol', text: symbol }), el('span', { text: label }));
             item.setAttribute('role', 'menuitem');
             menu.appendChild(item);
         });
+        menu.appendChild(button('Fechar', 'button ghost small more-menu-close', () => menu.remove()));
         document.body.appendChild(menu);
         const close = (event) => {
             if (!menu.contains(event.target) && event.target !== anchor) {
