@@ -497,7 +497,7 @@ function authenticatedUser(PDO $pdo, string $prefix): array
     }
 
     ensureSessions($pdo, $prefix);
-    $stmt = $pdo->prepare("SELECT u.id, u.name, u.email, u.phone, u.role, u.status, u.barbershop_id
+    $stmt = $pdo->prepare("SELECT u.id, u.name, u.email, u.phone, u.role, u.status, u.platform_admin, u.barbershop_id
         FROM `{$prefix}sessions` s
         INNER JOIN `{$prefix}users` u ON u.id = s.user_id
         WHERE s.token_hash = ? AND s.expires_at > UTC_TIMESTAMP() AND u.status = 'active'
@@ -509,6 +509,16 @@ function authenticatedUser(PDO $pdo, string $prefix): array
     }
     $user['id'] = (int)$user['id'];
     $user['barbershop_id'] = $user['barbershop_id'] === null ? null : (int)$user['barbershop_id'];
+    // Legacy installations may have active non-platform users without a tenant.
+    // Repair only the unambiguous legacy case: use the lowest existing shop id.
+    if ($user['barbershop_id'] === null && (int)($user['platform_admin'] ?? 0) === 0) {
+        $shopId = $pdo->query("SELECT MIN(id) FROM `" . str_replace('`', '', $prefix . 'barbershops') . "`")->fetchColumn();
+        if ($shopId !== false && $shopId !== null) {
+            $repair = $pdo->prepare("UPDATE `{$prefix}users` SET barbershop_id = ? WHERE id = ? AND barbershop_id IS NULL");
+            $repair->execute([(int)$shopId, (int)$user['id']]);
+            $user['barbershop_id'] = (int)$shopId;
+        }
+    }
     return $user;
 }
 
