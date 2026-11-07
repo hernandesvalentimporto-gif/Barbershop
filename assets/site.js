@@ -542,7 +542,7 @@
             el('p', { text: 'Use o mesmo acesso de WhatsApp e senha no celular.' }),
             el('div', { className: 'download-actions' }, [
                 el('a', { className: 'button block', href: 'https://github.com/hernandesvalentimporto-gif/Barbershop/releases/latest', target: '_blank', rel: 'noopener', text: 'Android (APK)' }),
-                el('a', { className: 'button secondary block', href: 'https://testflight.apple.com/join/barbershop-sistemas-hp', target: '_blank', rel: 'noopener', text: 'iPhone (TestFlight)' })
+                el('button', { className: 'button secondary block', type: 'button', disabled: true, text: 'iPhone (em breve)' })
             ])
         ]);
         card.append(form, downloads, el('div', { className: 'auth-links' }, [authLink('Esqueci minha senha', 'forgot')]));
