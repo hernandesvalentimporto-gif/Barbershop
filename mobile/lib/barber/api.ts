@@ -172,10 +172,10 @@ export async function request<T>(
 }
 
 export const api = {
-  login(email: string, password: string) {
+  login(identifier: string, password: string) {
     return request<{ token: string; user: User; expires_in?: number }>("login", {
       method: "POST",
-      body: { email, password },
+      body: { identifier, password },
     });
   },
   me() {

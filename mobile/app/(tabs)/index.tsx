@@ -1,6 +1,6 @@
 import Feather from "@expo/vector-icons/Feather";
 import React, { useEffect, useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Linking, Pressable, Text, View } from "react-native";
 
 import { api } from "@/lib/barber/api";
 import { useBarber } from "@/lib/barber/context";
@@ -24,7 +24,7 @@ import {
 
 function LoginScreen() {
   const { login, busy, authError, storageError, retryStorageCleanup, clearAuthError } = useBarber();
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
@@ -32,8 +32,8 @@ function LoginScreen() {
   async function submit() {
     setValidation(null);
     clearAuthError();
-    if (!email.trim() || !email.includes("@")) {
-      setValidation("Informe um e-mail válido.");
+    if (!identifier.trim()) {
+      setValidation("Informe seu WhatsApp/telefone ou e-mail.");
       return;
     }
     if (!password) {
@@ -41,7 +41,7 @@ function LoginScreen() {
       return;
     }
     try {
-      await login(email, password);
+      await login(identifier, password);
     } catch {
       // The provider exposes the server/network message below the form.
     }
@@ -56,14 +56,14 @@ function LoginScreen() {
           <Text style={styles.subtitle}>Acesse sua conta para continuar.</Text>
         </View>
         <Field
-          label="E-mail"
-          value={email}
-          onChangeText={setEmail}
+          label="WhatsApp/telefone ou e-mail"
+          value={identifier}
+          onChangeText={setIdentifier}
           autoCapitalize="none"
           autoCorrect={false}
-          keyboardType="email-address"
+          keyboardType="phone-pad"
           textContentType="username"
-          placeholder="voce@email.com"
+          placeholder="(00) 00000-0000 ou e-mail"
           onFocus={clearAuthError}
         />
         <View style={{ gap: 7 }}>
@@ -92,6 +92,7 @@ function LoginScreen() {
         {validation || authError ? <Notice tone="danger">{validation ?? authError}</Notice> : null}
         {storageError ? <Button variant="secondary" loading={busy} onPress={() => void retryStorageCleanup()}>Tentar limpar sessão</Button> : null}
         <Button onPress={submit} loading={busy} icon="log-in">Entrar</Button>
+        <Button variant="ghost" onPress={() => void Linking.openURL("https://github.com/hernandesvalentimporto-gif/Barbershop/releases/latest")}>Baixar aplicativo para cliente</Button>
         <Notice>{WEB_STORAGE_WARNING}</Notice>
       </View>
     </Screen>

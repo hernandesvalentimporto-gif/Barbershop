@@ -5,6 +5,7 @@ export type BarberUser = {
   id: number;
   name: string;
   email: string;
+  phone?: string | null;
   role: BarberRole;
   status: UserStatus;
 };
@@ -77,7 +78,8 @@ export type AppointmentListResponse = { appointments: Appointment[] };
 export type SaveUserInput = {
   id?: number;
   name: string;
-  email: string;
+  email?: string;
+  phone?: string;
   role: "client" | "barber";
   status: "active" | "inactive";
   password?: string;
