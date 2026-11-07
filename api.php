@@ -49,6 +49,52 @@ function apiStringLength(string $value): int
     return function_exists('mb_strlen') ? mb_strlen($value, 'UTF-8') : strlen($value);
 }
 
+function apiNormalizePhone(mixed $value): ?string
+{
+    if (!is_string($value)) {
+        return null;
+    }
+    $digits = preg_replace('/\D+/', '', trim($value)) ?? '';
+    if ($digits === '') {
+        return null;
+    }
+    if (strlen($digits) === 10 || strlen($digits) === 11) {
+        $digits = '55' . $digits;
+    }
+    return preg_match('/^[1-9][0-9]{10,14}$/', $digits) === 1 ? $digits : null;
+}
+
+function apiInternalClientEmail(string $phone): string
+{
+    return 'client+' . $phone . '@barbershop.invalid';
+}
+
+function apiEnsureApplicationSchema(PDO $pdo, string $prefix): void
+{
+    static $checked = [];
+    $key = spl_object_id($pdo) . ':' . $prefix;
+    if (isset($checked[$key])) {
+        return;
+    }
+    $checked[$key] = true;
+    $table = $prefix . 'users';
+    $column = $pdo->prepare('SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
+    $column->execute([$table, 'phone']);
+    if ((int)$column->fetchColumn() === 0) {
+        $quoted = '`' . str_replace('`', '', $table) . '`';
+        $pdo->exec("ALTER TABLE {$quoted} ADD COLUMN phone VARCHAR(20) NULL AFTER email");
+        $pdo->exec("ALTER TABLE {$quoted} ADD KEY idx_" . preg_replace('/[^A-Za-z0-9_]/', '', $prefix) . "users_phone (phone)");
+    }
+    // Existing installations created before tenant isolation may have a single
+    // barbershop and users without a tenant. Repair only that unambiguous case.
+    $shops = $pdo->query("SELECT MIN(id), COUNT(*) FROM `" . str_replace('`', '', $prefix . 'barbershops') . "`")->fetch(PDO::FETCH_NUM);
+    if ($shops && (int)$shops[1] === 1 && $shops[0] !== null) {
+        $usersTable = '`' . str_replace('`', '', $table) . '`';
+        $repair = $pdo->prepare("UPDATE {$usersTable} SET barbershop_id = ? WHERE barbershop_id IS NULL AND platform_admin = 0");
+        $repair->execute([(int)$shops[0]]);
+    }
+}
+
 function apiIntegerValue(mixed $value): ?int
 {
     if (is_int($value)) {
@@ -101,7 +147,7 @@ function apiParseLocalDateTime(string $value): ?DateTimeImmutable
  */
 function apiValidateUserPayload(array $payload, bool $isUpdate = false, array $existing = []): array
 {
-    $required = ['name', 'email', 'role', 'status'];
+    $required = ['name', 'role', 'status'];
     if (!$isUpdate) {
         foreach ($required as $field) {
             if (!array_key_exists($field, $payload)) {
@@ -112,6 +158,7 @@ function apiValidateUserPayload(array $payload, bool $isUpdate = false, array $e
 
     $nameValue = $payload['name'] ?? ($existing['name'] ?? null);
     $emailValue = $payload['email'] ?? ($existing['email'] ?? null);
+    $phoneValue = $payload['phone'] ?? ($existing['phone'] ?? null);
     $roleValue = $payload['role'] ?? ($existing['role'] ?? null);
     $statusValue = $payload['status'] ?? ($existing['status'] ?? null);
 
@@ -122,15 +169,6 @@ function apiValidateUserPayload(array $payload, bool $isUpdate = false, array $e
     if ($name === '' || apiStringLength($name) > 160) {
         return ['ok' => false, 'error' => 'invalid_user'];
     }
-
-    if (!is_string($emailValue)) {
-        return ['ok' => false, 'error' => 'invalid_user'];
-    }
-    $email = strtolower(trim($emailValue));
-    if ($email === '' || apiStringLength($email) > 190 || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
-        return ['ok' => false, 'error' => 'invalid_user'];
-    }
-
     if (!is_string($roleValue) || !in_array($roleValue, ['client', 'barber'], true)) {
         return ['ok' => false, 'error' => 'invalid_user'];
     }
@@ -138,10 +176,27 @@ function apiValidateUserPayload(array $payload, bool $isUpdate = false, array $e
         return ['ok' => false, 'error' => 'invalid_user'];
     }
 
+    $phone = apiNormalizePhone($phoneValue);
+    if ($roleValue === 'client' && $phone === null) {
+        return ['ok' => false, 'error' => 'invalid_phone'];
+    }
+    if ($roleValue === 'barber') {
+        if (!is_string($emailValue)) {
+            return ['ok' => false, 'error' => 'invalid_user'];
+        }
+        $email = strtolower(trim($emailValue));
+        if ($email === '' || apiStringLength($email) > 190 || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            return ['ok' => false, 'error' => 'invalid_user'];
+        }
+    } else {
+        $email = $phone !== null ? apiInternalClientEmail($phone) : strtolower(trim((string)$emailValue));
+    }
+
     $result = [
         'ok' => true,
         'name' => $name,
         'email' => $email,
+        'phone' => $phone,
         'role' => $roleValue,
         'status' => $statusValue,
     ];
@@ -399,6 +454,7 @@ function database(): array
     } catch (Throwable) {
         apiError('database_unavailable', 503);
     }
+    apiEnsureApplicationSchema($pdo, $prefix);
     return [$pdo, $prefix, $config];
 }
 
@@ -441,7 +497,7 @@ function authenticatedUser(PDO $pdo, string $prefix): array
     }
 
     ensureSessions($pdo, $prefix);
-    $stmt = $pdo->prepare("SELECT u.id, u.name, u.email, u.role, u.status, u.barbershop_id
+    $stmt = $pdo->prepare("SELECT u.id, u.name, u.email, u.phone, u.role, u.status, u.barbershop_id
         FROM `{$prefix}sessions` s
         INNER JOIN `{$prefix}users` u ON u.id = s.user_id
         WHERE s.token_hash = ? AND s.expires_at > UTC_TIMESTAMP() AND u.status = 'active'
@@ -467,7 +523,7 @@ function apiTenantId(array $user): int
 
 function apiFetchUser(PDO $pdo, string $prefix, int $id, ?int $tenantId = null): ?array
 {
-    $sql = "SELECT id, name, email, password_hash, role, status, barbershop_id FROM `{$prefix}users` WHERE id = ?";
+    $sql = "SELECT id, name, email, phone, password_hash, role, status, barbershop_id FROM `{$prefix}users` WHERE id = ?";
     $params = [$id];
     if ($tenantId !== null) { $sql .= ' AND barbershop_id = ?'; $params[] = $tenantId; }
     $sql .= ' LIMIT 1';
@@ -543,7 +599,7 @@ function handleUsers(PDO $pdo, string $prefix, array $user): never
     }
 
     $tenantId = apiTenantId($user);
-    $sql = "SELECT id, name, email, role, status FROM `{$prefix}users` WHERE barbershop_id = ? AND role IN ('client', 'barber')";
+    $sql = "SELECT id, name, email, phone, role, status FROM `{$prefix}users` WHERE barbershop_id = ? AND role IN ('client', 'barber')";
     $params = [$tenantId];
     if ($role !== '') {
         $sql .= ' AND role = ?';
@@ -564,6 +620,7 @@ function handleUsers(PDO $pdo, string $prefix, array $user): never
             'id' => (int)$row['id'],
             'name' => (string)$row['name'],
             'email' => (string)$row['email'],
+            'phone' => $row['phone'] === null ? null : (string)$row['phone'],
             'role' => (string)$row['role'],
             'status' => (string)$row['status'],
         ];
@@ -604,22 +661,30 @@ function handleUserSave(PDO $pdo, string $prefix, array $currentUser): never
     if ($duplicate->fetchColumn() !== false) {
         apiError('email_already_exists', 409);
     }
+    if ($validated['phone'] !== null) {
+        $phoneDuplicate = $pdo->prepare("SELECT id FROM `{$prefix}users` WHERE phone = ? AND id <> ? AND barbershop_id = ? LIMIT 1");
+        $phoneDuplicate->execute([$validated['phone'], $id ?? 0, $tenantId]);
+        if ($phoneDuplicate->fetchColumn() !== false) {
+            apiError('phone_already_exists', 409);
+        }
+    }
 
     try {
         if ($id === null) {
-            $stmt = $pdo->prepare("INSERT INTO `{$prefix}users` (barbershop_id, name, email, password_hash, role, status) VALUES (?, ?, ?, ?, ?, ?)");
+            $stmt = $pdo->prepare("INSERT INTO `{$prefix}users` (barbershop_id, name, email, phone, password_hash, role, status) VALUES (?, ?, ?, ?, ?, ?, ?)");
             $stmt->execute([
                 $tenantId,
                 $validated['name'],
                 $validated['email'],
+                $validated['phone'],
                 password_hash((string)$validated['password'], PASSWORD_DEFAULT),
                 $validated['role'],
                 $validated['status'],
             ]);
             $id = (int)$pdo->lastInsertId();
         } else {
-            $fields = ['name = ?', 'email = ?', 'role = ?', 'status = ?'];
-            $params = [$validated['name'], $validated['email'], $validated['role'], $validated['status']];
+            $fields = ['name = ?', 'email = ?', 'phone = ?', 'role = ?', 'status = ?'];
+            $params = [$validated['name'], $validated['email'], $validated['phone'], $validated['role'], $validated['status']];
             if (array_key_exists('password', $validated)) {
                 $fields[] = 'password_hash = ?';
                 $params[] = password_hash((string)$validated['password'], PASSWORD_DEFAULT);
@@ -646,6 +711,7 @@ function handleUserSave(PDO $pdo, string $prefix, array $currentUser): never
             'id' => (int)$saved['id'],
             'name' => (string)$saved['name'],
             'email' => (string)$saved['email'],
+            'phone' => $saved['phone'] === null ? null : (string)$saved['phone'],
             'role' => (string)$saved['role'],
             'status' => (string)$saved['status'],
         ],
@@ -1213,13 +1279,15 @@ function runApi(): never
         if ($action === 'login') {
             apiRequireMethod('POST');
             $data = apiReadBody();
-            $email = is_string($data['email'] ?? null) ? strtolower(trim((string)$data['email'])) : '';
+            $identifier = is_string($data['identifier'] ?? null) ? trim((string)$data['identifier']) : (is_string($data['email'] ?? null) ? trim((string)$data['email']) : '');
             $password = is_string($data['password'] ?? null) ? (string)$data['password'] : '';
-            if ($email === '' || apiStringLength($email) > 190 || filter_var($email, FILTER_VALIDATE_EMAIL) === false || $password === '' || strlen($password) > 4096) {
+            $email = filter_var($identifier, FILTER_VALIDATE_EMAIL) !== false ? strtolower($identifier) : '';
+            $phone = $email === '' ? apiNormalizePhone($identifier) : null;
+            if (($email === '' && $phone === null) || $password === '' || strlen($password) > 4096) {
                 apiError('invalid_credentials', 422);
             }
-            $stmt = $pdo->prepare("SELECT id, name, email, password_hash, role, status, barbershop_id FROM `{$prefix}users` WHERE email = ? LIMIT 1");
-            $stmt->execute([$email]);
+            $stmt = $pdo->prepare("SELECT id, name, email, phone, password_hash, role, status, barbershop_id FROM `{$prefix}users` WHERE (email = ? OR phone = ?) LIMIT 1");
+            $stmt->execute([$email !== '' ? $email : '__no_email__', $phone]);
             $loginUser = $stmt->fetch();
             if (!$loginUser || $loginUser['status'] !== 'active' || !password_verify($password, (string)$loginUser['password_hash'])) {
                 apiError('invalid_credentials', 401);

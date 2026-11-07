@@ -26,7 +26,9 @@
         trialing: 'Em teste', active: 'Pagando', past_due: 'Inadimplente', paused: 'Pausada', canceled: 'Cancelada', expired: 'Vencida', without_subscription: 'Sem assinatura'
     };
     const errorLabels = {
-        invalid_credentials: 'E-mail ou senha inválidos.',
+        invalid_credentials: 'WhatsApp/e-mail ou senha inválidos.',
+        invalid_phone: 'Informe um WhatsApp válido com DDD.',
+        phone_already_exists: 'Já existe um cliente com este WhatsApp.',
         unauthorized: 'Sua sessão expirou. Entre novamente.',
         forbidden: 'Você não tem permissão para esta ação.',
         csrf_invalid: 'A página precisa ser atualizada antes de salvar.',
@@ -104,7 +106,8 @@
         platformDetailId: null,
         platformEditingShop: false,
         renderId: 0,
-        toastTimer: null
+        toastTimer: null,
+        whatsappInvite: null
     };
 
     function el(tag, attrs = {}, children = []) {
@@ -508,14 +511,14 @@
     }
 
     function renderLogin(card) {
-        card.append(el('h2', { text: 'Entrar na conta' }), el('p', { className: 'subheading', text: 'Use o e-mail da sua conta Barber Shop.' }));
+        card.append(el('h2', { text: 'Entrar na conta' }), el('p', { className: 'subheading', text: 'Use seu WhatsApp/telefone ou e-mail e a senha.' }));
         const form = el('form', { className: 'auth-form', novalidate: true, autocomplete: 'off' });
-        const email = input('email', 'login-email', '', { autocomplete: 'username', required: true, maxlength: 190, placeholder: 'voce@exemplo.com' });
+        const email = input('text', 'login-email', '', { autocomplete: 'username', required: true, maxlength: 190, placeholder: '(00) 00000-0000 ou e-mail' });
         const password = passwordControl('login-password', { required: true, maxlength: 4096, placeholder: 'Sua senha' });
         const message = el('p', { className: 'form-message', role: 'alert', 'aria-live': 'polite' });
         const submit = button('Entrar', 'button block');
         submit.type = 'submit';
-        form.append(field('E-mail', email), field('Senha', password), message, submit);
+        form.append(field('WhatsApp/telefone ou e-mail', email), field('Senha', password), message, submit);
         form.addEventListener('submit', async (event) => {
             event.preventDefault();
             if (!form.reportValidity() || submit.disabled) return;
@@ -523,7 +526,7 @@
             message.className = 'form-message';
             message.textContent = '';
             try {
-                const result = await api('login', { method: 'POST', body: { email: email.value.trim(), password: password.querySelector('input').value } });
+                const result = await api('login', { method: 'POST', body: { identifier: email.value.trim(), password: password.querySelector('input').value } });
                 state.user = result.user || null;
                 if (!state.user) throw new ApiError('invalid_credentials', 401);
                 navigate(defaultViewForRole(state.user.role), true);
@@ -534,7 +537,15 @@
                 setButtonBusy(submit, false);
             }
         });
-        card.append(form, el('div', { className: 'auth-links' }, [authLink('Esqueci minha senha', 'forgot')]));
+        const downloads = el('div', { className: 'app-downloads' }, [
+            el('strong', { text: 'Baixe o aplicativo para o cliente' }),
+            el('p', { text: 'Use o mesmo acesso de WhatsApp e senha no celular.' }),
+            el('div', { className: 'download-actions' }, [
+                el('a', { className: 'button block', href: 'https://github.com/hernandesvalentimporto-gif/Barbershop/releases/latest', target: '_blank', rel: 'noopener', text: 'Android (APK)' }),
+                el('a', { className: 'button secondary block', href: 'https://testflight.apple.com/join/barbershop-sistemas-hp', target: '_blank', rel: 'noopener', text: 'iPhone (TestFlight)' })
+            ])
+        ]);
+        card.append(form, downloads, el('div', { className: 'auth-links' }, [authLink('Esqueci minha senha', 'forgot')]));
     }
 
     function renderForgot(card) {
@@ -1432,7 +1443,7 @@
         }
         const users = Array.isArray(result.users) ? result.users : [];
         clear(content);
-        content.append(pageIntro(title, description, [button(role === 'client' ? 'Novo cliente' : 'Novo barbeiro', 'button', () => { state.editingUser = null; renderPeopleContent(content, role, users); })]));
+        content.append(pageIntro(title, description, [button(role === 'client' ? 'Novo cliente' : 'Novo barbeiro', 'button', () => { state.editingUser = null; state.whatsappInvite = null; renderPeopleContent(content, role, users); })]));
         renderPeopleContent(content, role, users, true);
     }
 
@@ -1442,7 +1453,9 @@
         const editing = state.editingUser && state.editingUser.role === role ? state.editingUser : null;
         const form = userForm(role, editing, async () => {
             try {
-                const result = await api('user_save', { method: 'POST', body: collectUserPayload(role, editing, form) });
+                const payload = collectUserPayload(role, editing, form);
+                const result = await api('user_save', { method: 'POST', body: payload });
+                if (!editing && role === 'client') state.whatsappInvite = { name: result.user.name, phone: result.user.phone || payload.phone, password: payload.password };
                 state.editingUser = null;
                 showToast(editing ? 'Cadastro atualizado.' : 'Cadastro criado.');
                 const fresh = await api('users', { params: { role } });
@@ -1469,7 +1482,7 @@
                 } catch (error) { showToast(friendlyError(error), 'error'); setButtonBusy(toggle, false); }
             });
             records.append(el('article', { className: 'record-card' }, [
-                el('div', { className: 'record-primary' }, [el('strong', { text: user.name }), el('small', { text: user.email })]),
+                el('div', { className: 'record-primary' }, [el('strong', { text: user.name }), el('small', { text: role === 'client' && user.phone ? user.phone : user.email })]),
                 el('div', { className: 'record-secondary' }, [statusPill(user.status), edit, toggle])
             ]));
         });
@@ -1479,10 +1492,25 @@
         if (!replaceListOnly) return;
     }
 
+    function whatsappInviteCard(invite) {
+        const digits = String(invite.phone || '').replace(/\D/g, '');
+        const loginUrl = new URL(window.location.href);
+        loginUrl.search = '?view=login';
+        loginUrl.hash = '';
+        const text = `Olá ${invite.name}! Seu acesso à Barber Shop está pronto.\n\nAcesse: ${loginUrl.toString()}\nWhatsApp: ${invite.phone}\nSenha: ${invite.password}\n\nGuarde esses dados com segurança.`;
+        const link = `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
+        return el('div', { className: 'whatsapp-invite' }, [
+            el('strong', { text: 'Cliente cadastrado com sucesso' }),
+            el('p', { text: 'Envie agora o link de acesso e a senha pelo WhatsApp.' }),
+            el('a', { className: 'button block', href: link, target: '_blank', rel: 'noopener', text: 'Enviar acesso pelo WhatsApp' })
+        ]);
+    }
+
     function userForm(role, editing, onSubmit) {
         const form = el('form', { className: 'card form-card', novalidate: true, autocomplete: 'off' });
         const name = input('text', 'user-name-input', editing ? editing.name : '', { maxlength: 160, required: true, autocomplete: 'name', placeholder: 'Nome completo' });
-        const email = input('email', 'user-email-input', editing ? editing.email : '', { maxlength: 190, required: true, autocomplete: 'email', placeholder: 'email@exemplo.com' });
+        const phone = input('tel', 'user-phone-input', editing ? (editing.phone || '') : '', { maxlength: 20, required: role === 'client', autocomplete: 'tel', placeholder: '(00) 00000-0000' });
+        const email = input('email', 'user-email-input', editing ? editing.email : '', { maxlength: 190, required: role !== 'client', autocomplete: 'email', placeholder: 'email@exemplo.com' });
         const status = selectInput('user-status-input', { required: true });
         addSelectOptions(status, [{ id: 'active', name: 'Ativo' }, { id: 'inactive', name: 'Inativo' }], null);
         status.value = editing ? editing.status : 'active';
@@ -1490,7 +1518,7 @@
         const message = el('p', { className: 'form-message', role: 'alert', 'aria-live': 'polite' });
         const submit = button(editing ? 'Salvar alterações' : `Cadastrar ${role === 'client' ? 'cliente' : 'barbeiro'}`, 'button');
         submit.type = 'submit';
-        form.append(el('h3', { text: editing ? 'Editar cadastro' : `Novo ${role === 'client' ? 'cliente' : 'barbeiro'}` }), el('p', { text: editing ? 'A senha é opcional na edição.' : 'A senha inicial precisa ter no mínimo 8 caracteres.' }), el('div', { className: 'form-grid' }, [field('Nome completo', name), field('E-mail', email), field('Status', status), field('Senha', password, editing ? 'Opcional na edição.' : 'Obrigatória, mínimo de 8 caracteres.')]), message, el('div', { className: 'form-actions' }, [submit, editing ? button('Cancelar edição', 'button secondary', () => { state.editingUser = null; renderApp(); }) : null]));
+        form.append(el('h3', { text: editing ? 'Editar cadastro' : `Novo ${role === 'client' ? 'cliente' : 'barbeiro'}` }), el('p', { text: editing ? 'A senha é opcional na edição.' : 'A senha inicial precisa ter no mínimo 8 caracteres.' }), el('div', { className: 'form-grid' }, [field('Nome completo', name), role === 'client' ? field('WhatsApp/telefone', phone) : field('E-mail', email), role === 'client' ? null : field('Status', status), role === 'client' ? field('Status', status) : null, field('Senha', password, editing ? 'Opcional na edição.' : 'Obrigatória, mínimo de 8 caracteres.')]), message, state.whatsappInvite && role === 'client' ? whatsappInviteCard(state.whatsappInvite) : null, el('div', { className: 'form-actions' }, [submit, editing ? button('Cancelar edição', 'button secondary', () => { state.editingUser = null; state.whatsappInvite = null; renderApp(); }) : null]));
         form.addEventListener('submit', async (event) => {
             event.preventDefault();
             if (!form.reportValidity() || submit.disabled) return;
@@ -1508,10 +1536,11 @@
     function collectUserPayload(role, editing, form) {
         const payload = {
             name: form.querySelector('#user-name-input').value.trim(),
-            email: form.querySelector('#user-email-input').value.trim(),
             role,
             status: form.querySelector('#user-status-input').value
         };
+        if (role === 'client') payload.phone = form.querySelector('#user-phone-input').value.trim();
+        else payload.email = form.querySelector('#user-email-input').value.trim();
         const password = form.querySelector('#user-password-input').value;
         if (password) payload.password = password;
         if (editing) payload.id = Number(editing.id);

@@ -53,21 +53,22 @@ function webHandleLogin(): never
     webSessionClose();
 
     $data = webReadJsonBody();
-    $email = is_string($data['email'] ?? null) ? strtolower(trim((string)$data['email'])) : '';
+    $identifier = is_string($data['identifier'] ?? null) ? trim((string)$data['identifier']) : (is_string($data['email'] ?? null) ? trim((string)$data['email']) : '');
+    $email = filter_var($identifier, FILTER_VALIDATE_EMAIL) !== false ? strtolower($identifier) : '';
+    $phone = $email === '' ? apiNormalizePhone($identifier) : null;
     $password = is_string($data['password'] ?? null) ? (string)$data['password'] : '';
-    if ($email === '' || strlen($email) > 190 || filter_var($email, FILTER_VALIDATE_EMAIL) === false
-        || $password === '' || strlen($password) > 4096) {
+    if (($email === '' && $phone === null) || $password === '' || strlen($password) > 4096) {
         webError('invalid_credentials', 422);
     }
 
-    if (!webRateLimitAllowed('login', [$email, webClientIdentifier()], 8, 900)) {
+    if (!webRateLimitAllowed('login', [$identifier, webClientIdentifier()], 8, 900)) {
         webError('rate_limited', 429);
     }
 
     [$pdo, $prefix] = webOpenDatabase();
-    $stmt = $pdo->prepare("SELECT id, name, email, password_hash, role, status, platform_admin, barbershop_id
-        FROM `{$prefix}users` WHERE email = ? LIMIT 1");
-    $stmt->execute([$email]);
+    $stmt = $pdo->prepare("SELECT id, name, email, phone, password_hash, role, status, platform_admin, barbershop_id
+        FROM `{$prefix}users` WHERE (email = ? OR phone = ?) LIMIT 1");
+    $stmt->execute([$email !== '' ? $email : '__no_email__', $phone]);
     $user = $stmt->fetch();
     if (!is_array($user) || (string)$user['status'] !== 'active'
         || !password_verify($password, (string)$user['password_hash'])) {
