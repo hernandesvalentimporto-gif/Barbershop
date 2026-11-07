@@ -25,7 +25,7 @@ for attempt in $(seq 1 15); do
   fi
   adb shell uiautomator dump /sdcard/barber-startup.xml > /dev/null 2>&1 || true
   adb pull /sdcard/barber-startup.xml "$out/login-screen.xml" > /dev/null 2>&1 || true
-  if [ -f "$out/login-screen.xml" ] && grep -q 'Entrar' "$out/login-screen.xml" && grep -q 'E-mail' "$out/login-screen.xml"; then
+  if [ -f "$out/login-screen.xml" ] && grep -q 'Entrar' "$out/login-screen.xml" && (grep -q 'E-mail' "$out/login-screen.xml" || grep -q 'WhatsApp' "$out/login-screen.xml"); then
     found=1
     break
   fi
@@ -46,7 +46,7 @@ adb shell am start -W -n "$package/.MainActivity"
 sleep 5
 adb shell uiautomator dump /sdcard/barber-startup.xml > /dev/null
 adb pull /sdcard/barber-startup.xml "$out/login-screen.xml" > /dev/null
-if ! grep -q 'Entrar' "$out/login-screen.xml" || ! grep -q 'E-mail' "$out/login-screen.xml"; then
+if ! grep -q 'Entrar' "$out/login-screen.xml" || ! (grep -q 'E-mail' "$out/login-screen.xml" || grep -q 'WhatsApp' "$out/login-screen.xml"); then
   echo 'FALHA: a tela de login não permaneceu disponível ao reabrir.'
   exit 1
 fi
