@@ -646,7 +646,7 @@ function handleUsers(PDO $pdo, string $prefix, array $user): never
 function handleUserSave(PDO $pdo, string $prefix, array $currentUser): never
 {
     apiRequireMethod('POST');
-    if ($currentUser['role'] !== 'admin') {
+    if ($currentUser['role'] !== 'admin' && $currentUser['role'] !== 'barber') {
         apiError('forbidden', 403);
     }
     $tenantId = apiTenantId($currentUser);
@@ -667,6 +667,9 @@ function handleUserSave(PDO $pdo, string $prefix, array $currentUser): never
         }
     }
 
+    if ($currentUser['role'] === 'barber') {
+        $data['role'] = 'client';
+    }
     $validated = apiValidateUserPayload($data, $id !== null, $existing);
     if (!$validated['ok']) {
         apiError((string)$validated['error'], 422);
