@@ -20,10 +20,11 @@ export default function TabLayout() {
   const bottomPadding = Platform.OS === "web" ? 10 : Math.max(insets.bottom, 8);
   const tabBarHeight = 60 + bottomPadding;
   const isClient = user?.role === "client";
-  const isStaff = user?.role === "barber" || user?.role === "admin";
-  const isAdmin = user?.role === "admin";
+  const isPlatformAdmin = Boolean(user?.platform_admin);
+  const isStaff = user?.role === "barber" || (user?.role === "admin" && !isPlatformAdmin);
+  const isAdmin = user?.role === "admin" && !isPlatformAdmin;
   const route = segments[segments.length - 1];
-  const redirect = tabAccessRedirect(route, user?.role ?? null, authReady);
+  const redirect = tabAccessRedirect(route, user?.role ?? null, authReady, isPlatformAdmin);
 
   if (redirect) {
     return <Redirect href={redirect} />;

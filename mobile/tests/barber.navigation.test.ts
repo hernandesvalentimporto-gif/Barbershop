@@ -16,5 +16,7 @@ describe("entrada e permissões do aplicativo", () => {
     expect(tabAccessRedirect("services", "admin", true)).toBeNull();
     expect(tabAccessRedirect("services", "client", true)).toBe("/");
     expect(tabAccessRedirect("booking", "admin", true)).toBeNull();
+    expect(tabAccessRedirect("booking", "admin", true, true)).toBe("/");
+    expect(tabAccessRedirect("agenda", "admin", true, true)).toBe("/");
   });
 });

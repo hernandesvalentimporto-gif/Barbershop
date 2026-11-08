@@ -5,6 +5,7 @@ export function tabAccessRedirect(
   route: string | undefined,
   role: BarberRole | null,
   authReady: boolean,
+  platformAdmin = false,
 ): "/" | null {
   if (!authReady) return null;
   const clientRoute = route === "history";
@@ -14,6 +15,7 @@ export function tabAccessRedirect(
   const protectedRoute = clientRoute || bookingRoute || staffRoute || adminRoute || route === "more";
   if (!protectedRoute) return null;
   if (!role) return "/";
+  if (platformAdmin && (bookingRoute || staffRoute || adminRoute)) return "/";
   if (clientRoute && role !== "client") return "/";
   if (bookingRoute && role !== "client" && role !== "barber" && role !== "admin") return "/";
   if (staffRoute && role !== "barber" && role !== "admin") return "/";

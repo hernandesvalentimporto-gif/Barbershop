@@ -175,7 +175,7 @@ export default function BookingScreen() {
     setSubmitError(null);
   }
 
-  if (!authReady || !user || (user.role !== "client" && user.role !== "barber" && user.role !== "admin")) return null;
+  if (!authReady || !user || user.platform_admin || (user.role !== "client" && user.role !== "barber" && user.role !== "admin")) return null;
 
   if (success) {
     return (

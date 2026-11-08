@@ -44,6 +44,7 @@ function normalizeUser(value: any): BarberUser {
     phone: value.phone == null ? null : String(value.phone),
     role,
     status: value.status ?? "active",
+    platform_admin: Boolean(value.platform_admin),
   };
 }
 

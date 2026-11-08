@@ -43,7 +43,7 @@ export default function AgendaScreen() {
   const statusLocksRef = useRef(new Set<number>());
 
   const load = useCallback(async () => {
-    if (!authReady || !user || (user.role !== "barber" && user.role !== "admin")) return;
+    if (!authReady || !user || user.platform_admin || (user.role !== "barber" && user.role !== "admin")) return;
     setLoading(true);
     setError(null);
     setFallbackNotice(null);
@@ -75,7 +75,7 @@ export default function AgendaScreen() {
   }, [authReady, date, user]);
 
   useEffect(() => {
-    if (!authReady || !user || (user.role !== "barber" && user.role !== "admin")) return;
+    if (!authReady || !user || user.platform_admin || (user.role !== "barber" && user.role !== "admin")) return;
     const timer = setTimeout(() => void load(), 0);
     return () => clearTimeout(timer);
   }, [authReady, load, user]);
@@ -100,7 +100,7 @@ export default function AgendaScreen() {
     }
   }
 
-  if (!authReady || !user || (user.role !== "barber" && user.role !== "admin")) return null;
+  if (!authReady || !user || user.platform_admin || (user.role !== "barber" && user.role !== "admin")) return null;
   return (
     <Screen>
       <Header title="Agenda" subtitle={user.role === "admin" ? "Acompanhe os atendimentos da equipe." : "Seus atendimentos e respectivos status."} right={<Button variant="ghost" icon="refresh-cw" onPress={() => void load()} />} />

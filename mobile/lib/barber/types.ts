@@ -8,6 +8,7 @@ export type BarberUser = {
   phone?: string | null;
   role: BarberRole;
   status: UserStatus;
+  platform_admin?: boolean;
 };
 
 export type Service = {
