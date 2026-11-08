@@ -83,7 +83,7 @@ function LoginScreen() {
               accessibilityRole="button"
               accessibilityLabel={showPassword ? "Ocultar senha" : "Mostrar senha"}
               onPress={() => setShowPassword((current) => !current)}
-              style={{ position: "absolute", right: 12, top: 12, minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center" }}
+              style={{ position: "absolute", right: 4, top: 3, minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center" }}
             >
               <Feather name={showPassword ? "eye-off" : "eye"} size={20} color={BARBER_COLORS.gold} />
             </Pressable>
@@ -92,7 +92,7 @@ function LoginScreen() {
         {validation || authError ? <Notice tone="danger">{validation ?? authError}</Notice> : null}
         {storageError ? <Button variant="secondary" loading={busy} onPress={() => void retryStorageCleanup()}>Tentar limpar sessão</Button> : null}
         <Button onPress={submit} loading={busy} icon="log-in">Entrar</Button>
-        <Button variant="ghost" onPress={() => void Linking.openURL("https://github.com/hernandesvalentimporto-gif/Barbershop/releases/latest")}>Baixar aplicativo para cliente</Button>
+        <Button variant="ghost" onPress={() => void Linking.openURL("https://github.com/hernandesvalentimporto-gif/Barbershop/releases/latest/download/BarberShop-SistemasHP-Teste-v2.apk")}>Baixar aplicativo para cliente</Button>
         <Notice>{WEB_STORAGE_WARNING}</Notice>
       </View>
     </Screen>

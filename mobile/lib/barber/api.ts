@@ -193,6 +193,7 @@ export const api = {
     });
   },
   appointmentCreate(input: {
+    client_id?: number;
     barber_id: number;
     service_id: number;
     starts_at: string;

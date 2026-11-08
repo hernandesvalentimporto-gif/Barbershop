@@ -106,7 +106,7 @@ export function Button({
   icon,
   style,
 }: {
-  children: React.ReactNode;
+  children?: React.ReactNode;
   onPress?: () => void;
   variant?: "primary" | "secondary" | "danger" | "ghost";
   disabled?: boolean;

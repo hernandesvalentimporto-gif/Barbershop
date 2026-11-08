@@ -15,7 +15,7 @@ export function tabAccessRedirect(
   if (!protectedRoute) return null;
   if (!role) return "/";
   if (clientRoute && role !== "client") return "/";
-  if (bookingRoute && role !== "client" && role !== "barber") return "/";
+  if (bookingRoute && role !== "client" && role !== "barber" && role !== "admin") return "/";
   if (staffRoute && role !== "barber" && role !== "admin") return "/";
   if (adminRoute && role !== "admin") return "/";
   return null;
