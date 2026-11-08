@@ -736,6 +736,48 @@ function handleUserSave(PDO $pdo, string $prefix, array $currentUser): never
     ], $existing ? 200 : 201);
 }
 
+function handleUserDelete(PDO $pdo, string $prefix, array $currentUser): never
+{
+    apiRequireMethod('POST');
+    if ($currentUser['role'] !== 'admin' && $currentUser['role'] !== 'barber') {
+        apiError('forbidden', 403);
+    }
+    $tenantId = apiTenantId($currentUser);
+    $data = apiReadBody();
+    $id = apiPositiveId($data['id'] ?? null);
+    if ($id === null || $id === (int)$currentUser['id']) {
+        apiError('invalid_user', 422);
+    }
+    $stmt = $pdo->prepare("SELECT id, role FROM `{$prefix}users` WHERE id = ? AND barbershop_id = ? LIMIT 1");
+    $stmt->execute([$id, $tenantId]);
+    $target = $stmt->fetch();
+    if (!$target || !in_array((string)$target['role'], ['client', 'barber'], true)) {
+        apiError('user_not_found', 404);
+    }
+    if ($currentUser['role'] === 'barber' && (string)$target['role'] !== 'client') {
+        apiError('forbidden', 403);
+    }
+    $pdo->beginTransaction();
+    try {
+        $stmt = $pdo->prepare("DELETE FROM `{$prefix}appointments` WHERE barbershop_id = ? AND (client_id = ? OR barber_id = ?)");
+        $stmt->execute([$tenantId, $id, $id]);
+        $stmt = $pdo->prepare("DELETE FROM `{$prefix}sessions` WHERE user_id = ?");
+        $stmt->execute([$id]);
+        $stmt = $pdo->prepare("DELETE FROM `{$prefix}users` WHERE id = ? AND barbershop_id = ? AND role IN ('client', 'barber')");
+        $stmt->execute([$id, $tenantId]);
+        if ($stmt->rowCount() !== 1) {
+            throw new RuntimeException('user_delete_failed');
+        }
+        $pdo->commit();
+    } catch (Throwable $exception) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $exception;
+    }
+    jsonResponse(['ok' => true, 'deleted_user_id' => $id]);
+}
+
 function handleServices(PDO $pdo, string $prefix, array $user): never
 {
     apiRequireMethod('GET');
@@ -1340,6 +1382,9 @@ function runApi(): never
         }
         if ($action === 'user_save') {
             handleUserSave($pdo, $prefix, $user);
+        }
+        if ($action === 'user_delete') {
+            handleUserDelete($pdo, $prefix, $user);
         }
         if ($action === 'services') {
             handleServices($pdo, $prefix, $user);
