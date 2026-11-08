@@ -37,6 +37,7 @@ export default function BookingScreen() {
   const [availabilityRetry, setAvailabilityRetry] = useState(0);
   const [selectedSlot, setSelectedSlot] = useState<AvailabilitySlot | null>(null);
   const [selectedSlotKey, setSelectedSlotKey] = useState<string | null>(null);
+  const [manualTime, setManualTime] = useState("");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState<{ id: number; status: string } | null>(null);
@@ -132,10 +133,26 @@ export default function BookingScreen() {
     setAvailabilityRetry((current) => current + 1);
   }
 
+  function buildManualSlot(): AvailabilitySlot | null {
+    if (!manualTime.match(/^([01]\d|2[0-3]):[0-5]\d$/) || !serviceId || !catalog) return null;
+    const service = catalog.services.find((item) => item.id === serviceId);
+    if (!service) return null;
+    const [hours, minutes] = manualTime.split(":").map(Number);
+    const start = new Date(`${date}T${manualTime}:00`);
+    if (Number.isNaN(start.getTime())) return null;
+    const end = new Date(start.getTime() + service.duration_minutes * 60_000);
+    const formatLocal = (value: Date) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")} ${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}:00`;
+    void hours; void minutes;
+    return { starts_at: formatLocal(start), ends_at: formatLocal(end) };
+  }
+
   async function confirmBooking() {
-    if (confirmLockRef.current || !selectedSlot || !serviceId || !barberId) return;
+    const isStaff = user?.role === "barber" || user?.role === "admin";
+    const manualSlot = isStaff ? buildManualSlot() : null;
+    const slot = selectedSlot ?? manualSlot;
+    if (confirmLockRef.current || !slot || !serviceId || !barberId) return;
     const keyAtStart = selectionKey;
-    if (selectedSlotKey !== keyAtStart || !bookingSelectionKey({ date, barberId, serviceId })) {
+    if (selectedSlot && (selectedSlotKey !== keyAtStart || !bookingSelectionKey({ date, barberId, serviceId }))) {
       setSelectedSlot(null);
       setSelectedSlotKey(null);
       setSubmitError("O horário selecionado não pertence mais à combinação atual. Escolha outro horário.");
@@ -144,7 +161,7 @@ export default function BookingScreen() {
     confirmLockRef.current = true;
     setSubmitting(true);
     setSubmitError(null);
-    const slotAtStart = selectedSlot;
+    const slotAtStart = slot;
     try {
       const result = await api.appointmentCreate({
         ...(user?.role !== "client" && clientId ? { client_id: clientId } : {}),
@@ -232,14 +249,15 @@ export default function BookingScreen() {
             <Text style={styles.sectionTitle}>{user.role !== "client" ? "5. Horário disponível" : "4. Horário disponível"}</Text>
             {slotsLoading ? <LoadingState label="Buscando horários..." /> : null}
             {!slotsLoading && slotsError ? <ErrorState message={slotsError} onRetry={retryAvailability} /> : null}
-            {!slotsLoading && !slotsError && !slots.length ? <Text style={styles.muted}>Nenhum horário disponível para esta combinação.</Text> : null}
-            {!slotsLoading && slots.length ? <View style={styles.wrap}>{slots.map((slot) => <ChoiceChip key={`${slot.starts_at}-${slot.ends_at}`} label={formatTime(slot.starts_at)} selected={selectedSlot?.starts_at === slot.starts_at} disabled={submitting} onPress={() => { setSelectedSlot(slot); setSelectedSlotKey(selectionKeyRef.current); setSubmitError(null); }} />)}</View> : null}
+            {!slotsLoading && !slotsError && !slots.length && user.role === "client" ? <Text style={styles.muted}>Nenhum horário disponível para esta combinação.</Text> : null}
+            {!slotsLoading && slots.length ? <View style={styles.wrap}>{slots.map((slot) => <ChoiceChip key={`${slot.starts_at}-${slot.ends_at}`} label={formatTime(slot.starts_at)} selected={selectedSlot?.starts_at === slot.starts_at} disabled={submitting} onPress={() => { setSelectedSlot(slot); setSelectedSlotKey(selectionKeyRef.current); setManualTime(formatTime(slot.starts_at)); setSubmitError(null); }} />)}</View> : null}
+            {user.role !== "client" ? <Field label="Horário para criar a agenda" value={manualTime} onChangeText={(value) => { setManualTime(value.replace(/[^0-9:]/g, "").slice(0, 5)); setSelectedSlot(null); setSelectedSlotKey(null); }} placeholder="Ex.: 09:00" keyboardType="numbers-and-punctuation" /> : null}
           </Card>
           <Card>
             <Text style={styles.sectionTitle}>{user.role !== "client" ? "6. Observações (opcional)" : "5. Observações (opcional)"}</Text>
             <Field label="Recado para o barbeiro" value={notes} onChangeText={setNotes} placeholder="Ex.: preferência de acabamento" multiline maxLength={300} />
             {submitError ? <Notice tone="danger">{submitError}</Notice> : null}
-            <Button onPress={() => void confirmBooking()} loading={submitting} disabled={!selectedSlot} icon="check">Confirmar agendamento</Button>
+            <Button onPress={() => void confirmBooking()} loading={submitting} disabled={!selectedSlot && !(user.role !== "client" && !!buildManualSlot())} icon="check">{user.role !== "client" ? "Criar agenda" : "Confirmar agendamento"}</Button>
             <Text style={styles.muted}>A reserva só aparece após confirmação positiva do servidor.</Text>
           </Card>
         </>
