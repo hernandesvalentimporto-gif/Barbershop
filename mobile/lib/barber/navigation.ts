@@ -11,14 +11,16 @@ export function tabAccessRedirect(
   const clientRoute = route === "history";
   const bookingRoute = route === "booking";
   const staffRoute = route === "agenda";
-  const adminRoute = route === "clients" || route === "services";
-  const protectedRoute = clientRoute || bookingRoute || staffRoute || adminRoute || route === "more";
+  const clientsRoute = route === "clients";
+  const servicesRoute = route === "services";
+  const protectedRoute = clientRoute || bookingRoute || staffRoute || clientsRoute || servicesRoute || route === "more";
   if (!protectedRoute) return null;
   if (!role) return "/";
-  if (platformAdmin && (bookingRoute || staffRoute || adminRoute)) return "/";
+  if (platformAdmin && (bookingRoute || staffRoute || clientsRoute || servicesRoute)) return "/";
   if (clientRoute && role !== "client") return "/";
   if (bookingRoute && role !== "client" && role !== "barber" && role !== "admin") return "/";
   if (staffRoute && role !== "barber" && role !== "admin") return "/";
-  if (adminRoute && role !== "admin") return "/";
+  if (clientsRoute && role !== "barber" && role !== "admin") return "/";
+  if (servicesRoute && role !== "admin") return "/";
   return null;
 }

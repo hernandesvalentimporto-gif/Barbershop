@@ -23,6 +23,7 @@ export default function TabLayout() {
   const isPlatformAdmin = Boolean(user?.platform_admin && !user?.barbershop_id);
   const isStaff = user?.role === "barber" || (user?.role === "admin" && !isPlatformAdmin);
   const isAdmin = user?.role === "admin" && !isPlatformAdmin;
+  const canManageClients = isAdmin || user?.role === "barber";
   const route = segments[segments.length - 1];
   const redirect = tabAccessRedirect(route, user?.role ?? null, authReady, isPlatformAdmin);
 
@@ -53,7 +54,7 @@ export default function TabLayout() {
       <Tabs.Screen name="booking" options={{ title: "Agendar", href: isClient ? "/booking" : null, tabBarIcon: ({ color, size }) => <Icon name="calendar" color={color} size={size} /> }} />
       <Tabs.Screen name="history" options={{ title: "Histórico", href: isClient ? "/history" : null, tabBarIcon: ({ color, size }) => <Icon name="clock" color={color} size={size} /> }} />
       <Tabs.Screen name="agenda" options={{ title: "Agenda", href: isStaff ? "/agenda" : null, tabBarIcon: ({ color, size }) => <Icon name="calendar" color={color} size={size} /> }} />
-      <Tabs.Screen name="clients" options={{ title: "Clientes", href: isAdmin ? "/clients" : null, tabBarIcon: ({ color, size }) => <Icon name="users" color={color} size={size} /> }} />
+      <Tabs.Screen name="clients" options={{ title: "Clientes", href: canManageClients ? "/clients" : null, tabBarIcon: ({ color, size }) => <Icon name="users" color={color} size={size} /> }} />
       <Tabs.Screen name="services" options={{ title: "Serviços", href: isAdmin ? "/services" : null, tabBarIcon: ({ color, size }) => <Icon name="scissors" color={color} size={size} /> }} />
       <Tabs.Screen name="more" options={{ title: "Mais", href: user ? "/more" : null, tabBarIcon: ({ color, size }) => <Icon name="menu" color={color} size={size} /> }} />
     </Tabs>

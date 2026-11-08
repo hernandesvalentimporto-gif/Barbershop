@@ -42,7 +42,7 @@ export default function ClientsScreen() {
   const toggleLocksRef = useRef(new Set<number>());
 
   const load = useCallback(async () => {
-    if (!authReady || !user || user.role !== "admin") return;
+    if (!authReady || !user || user.role !== "admin" && user.role !== "barber") return;
     setLoading(true);
     setError(null);
     try {
@@ -56,7 +56,7 @@ export default function ClientsScreen() {
   }, [authReady, role, search, user]);
 
   useEffect(() => {
-    if (!authReady || !user || user.role !== "admin") return;
+    if (!authReady || !user || user.role !== "admin" && user.role !== "barber") return;
     const timer = setTimeout(() => void load(), 0);
     return () => clearTimeout(timer);
     // Search is submitted by the button; the role effect only initializes each role.
@@ -115,8 +115,8 @@ export default function ClientsScreen() {
       });
       if (!editing && role === "client" && saved.user.phone) {
         const digits = saved.user.phone.replace(/\D/g, "");
-        const link = "https://sistemashp.com.br/barbershop/?view=login";
-        const text = `Olá ${saved.user.name}! Seu acesso está pronto.\n\nAcesse: ${link}\nWhatsApp: ${saved.user.phone}\nSenha: ${password}`;
+        const link = "https://github.com/hernandesvalentimporto-gif/Barbershop/releases/latest/download/BarberShop-SistemasHP-Teste-v2.apk";
+        const text = `Olá ${saved.user.name}! Seu acesso está pronto.\n\nBaixe o aplicativo: ${link}\nWhatsApp: ${saved.user.phone}\nSenha: ${password}`;
         setInviteUrl(`https://wa.me/${digits}?text=${encodeURIComponent(text)}`);
       }
       setNotice(editing ? "Usuário atualizado após confirmação do servidor." : "Usuário criado após confirmação do servidor.");
@@ -151,14 +151,14 @@ export default function ClientsScreen() {
     }
   }
 
-  if (!authReady || !user || user.role !== "admin") return null;
+  if (!authReady || !user || user.role !== "admin" && user.role !== "barber") return null;
 
   return (
     <Screen keyboard>
       <Header title="Pessoas" subtitle="Gerencie clientes e barbeiros sem excluir o histórico." />
       <View style={styles.wrap}>
         <ChoiceChip label="Clientes" selected={role === "client"} disabled={saving} onPress={() => { setRole("client"); setSearch(""); openNew(); }} />
-        <ChoiceChip label="Barbeiros" selected={role === "barber"} disabled={saving} onPress={() => { setRole("barber"); setSearch(""); openNew(); }} />
+        {user.role === "admin" ? <ChoiceChip label="Barbeiros" selected={role === "barber"} disabled={saving} onPress={() => { setRole("barber"); setSearch(""); openNew(); }} /> : null}
       </View>
       <Card>
         <View style={styles.row}><Text style={styles.sectionTitle}>Buscar {role === "client" ? "clientes" : "barbeiros"}</Text><Button variant="ghost" icon="user-plus" disabled={saving} onPress={openNew}>Novo</Button></View>
