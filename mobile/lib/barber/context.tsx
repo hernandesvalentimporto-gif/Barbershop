@@ -45,6 +45,7 @@ function normalizeUser(value: any): BarberUser {
     role,
     status: value.status ?? "active",
     platform_admin: Boolean(value.platform_admin),
+    barbershop_id: value.barbershop_id == null ? null : Number(value.barbershop_id),
   };
 }
 

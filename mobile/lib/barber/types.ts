@@ -9,6 +9,7 @@ export type BarberUser = {
   role: BarberRole;
   status: UserStatus;
   platform_admin?: boolean;
+  barbershop_id?: number | null;
 };
 
 export type Service = {

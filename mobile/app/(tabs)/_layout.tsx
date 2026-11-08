@@ -20,7 +20,7 @@ export default function TabLayout() {
   const bottomPadding = Platform.OS === "web" ? 10 : Math.max(insets.bottom, 8);
   const tabBarHeight = 60 + bottomPadding;
   const isClient = user?.role === "client";
-  const isPlatformAdmin = Boolean(user?.platform_admin);
+  const isPlatformAdmin = Boolean(user?.platform_admin && !user?.barbershop_id);
   const isStaff = user?.role === "barber" || (user?.role === "admin" && !isPlatformAdmin);
   const isAdmin = user?.role === "admin" && !isPlatformAdmin;
   const route = segments[segments.length - 1];
