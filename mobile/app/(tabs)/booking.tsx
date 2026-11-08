@@ -146,6 +146,15 @@ export default function BookingScreen() {
     return { starts_at: formatLocal(start), ends_at: formatLocal(end) };
   }
 
+  function staffTimeOptions(): string[] {
+    const duration = catalog?.services.find((item) => item.id === serviceId)?.duration_minutes ?? 30;
+    const options: string[] = [];
+    for (let minutes = 9 * 60; minutes <= 18 * 60 - duration; minutes += 30) {
+      options.push(`${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`);
+    }
+    return options;
+  }
+
   async function confirmBooking() {
     const isStaff = user?.role === "barber" || user?.role === "admin";
     const manualSlot = isStaff ? buildManualSlot() : null;
@@ -251,7 +260,22 @@ export default function BookingScreen() {
             {!slotsLoading && slotsError ? <ErrorState message={slotsError} onRetry={retryAvailability} /> : null}
             {!slotsLoading && !slotsError && !slots.length && user.role === "client" ? <Text style={styles.muted}>Nenhum horário disponível para esta combinação.</Text> : null}
             {!slotsLoading && slots.length ? <View style={styles.wrap}>{slots.map((slot) => <ChoiceChip key={`${slot.starts_at}-${slot.ends_at}`} label={formatTime(slot.starts_at)} selected={selectedSlot?.starts_at === slot.starts_at} disabled={submitting} onPress={() => { setSelectedSlot(slot); setSelectedSlotKey(selectionKeyRef.current); setManualTime(formatTime(slot.starts_at)); setSubmitError(null); }} />)}</View> : null}
-            {user.role !== "client" ? <Field label="Horário para criar a agenda" value={manualTime} onChangeText={(value) => { setManualTime(value.replace(/[^0-9:]/g, "").slice(0, 5)); setSelectedSlot(null); setSelectedSlotKey(null); }} placeholder="Ex.: 09:00" keyboardType="numbers-and-punctuation" /> : null}
+            {user.role !== "client" ? (
+              <View style={{ marginTop: 14 }}>
+                <Text style={styles.label}>Escolha o horário para criar a agenda</Text>
+                <View style={styles.wrap}>
+                  {staffTimeOptions().map((time) => (
+                    <ChoiceChip
+                      key={time}
+                      label={time}
+                      selected={manualTime === time}
+                      disabled={submitting}
+                      onPress={() => { setManualTime(time); setSelectedSlot(null); setSelectedSlotKey(null); setSubmitError(null); }}
+                    />
+                  ))}
+                </View>
+              </View>
+            ) : null}
           </Card>
           <Card>
             <Text style={styles.sectionTitle}>{user.role !== "client" ? "6. Observações (opcional)" : "5. Observações (opcional)"}</Text>
