@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Linking } from "react-native";
+import { Alert, Linking } from "react-native";
 import { Text, View } from "react-native";
 
 import { api } from "@/lib/barber/api";
@@ -117,7 +117,9 @@ export default function ClientsScreen() {
         const digits = saved.user.phone.replace(/\D/g, "");
         const link = "https://github.com/hernandesvalentimporto-gif/Barbershop/releases/latest/download/BarberShop-SistemasHP-Teste-v2.apk";
         const text = `Olá ${saved.user.name}! Seu acesso à barbearia está pronto.\n\nUsuário: ${saved.user.phone}\nSenha: ${password}\n\nBaixe o aplicativo: ${link}`;
-        setInviteUrl(`https://wa.me/${digits}?text=${encodeURIComponent(text)}`);
+        const inviteUrlValue = `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
+        setInviteUrl(inviteUrlValue);
+        void Linking.openURL(inviteUrlValue);
       }
       setNotice(editing ? "Usuário atualizado após confirmação do servidor." : "Usuário criado após confirmação do servidor.");
       openNew();
@@ -127,6 +129,38 @@ export default function ClientsScreen() {
     } finally {
       saveLockRef.current = false;
       setSaving(false);
+    }
+  }
+
+  function confirmDelete(item: BarberUser) {
+    const kind = item.role === "client" ? "cliente" : "barbeiro";
+    Alert.alert(
+      `Excluir ${kind}?`,
+      `O cadastro de ${item.name}, os acessos e os agendamentos vinculados serão apagados definitivamente do banco de dados. Esta ação não pode ser desfeita.`,
+      [
+        { text: "Cancelar", style: "cancel" },
+        { text: "Excluir definitivamente", style: "destructive", onPress: () => void deleteUser(item) },
+      ],
+    );
+  }
+
+  async function deleteUser(item: BarberUser) {
+    if (togglingIds.has(item.id)) return;
+    setTogglingIds((current) => new Set(current).add(item.id));
+    setNotice(null);
+    setError(null);
+    try {
+      await api.userDelete(item.id);
+      setNotice(`${item.role === "client" ? "Cliente" : "Barbeiro"} excluído definitivamente.`);
+      await load();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Não foi possível excluir o usuário.");
+    } finally {
+      setTogglingIds((current) => {
+        const next = new Set(current);
+        next.delete(item.id);
+        return next;
+      });
     }
   }
 
@@ -183,7 +217,7 @@ export default function ClientsScreen() {
       {!loading && !error && !users.length ? <EmptyState icon="users" title="Nenhum usuário encontrado" text="A busca considera apenas o perfil selecionado." /> : null}
       {!loading && !error ? users.map((item) => <Card key={item.id}>
         <View style={styles.row}><View style={{ flex: 1, gap: 4 }}><Text style={styles.sectionTitle}>{item.name}</Text><Text style={styles.muted}>{role === "client" && item.phone ? item.phone : item.email}</Text></View><Text style={{ color: item.status === "inactive" ? BARBER_COLORS.danger : BARBER_COLORS.success, fontWeight: "800" }}>{item.status === "inactive" ? "Inativo" : "Ativo"}</Text></View>
-        <View style={styles.row}><Button variant="secondary" icon="edit-2" disabled={togglingIds.size > 0 || saving} onPress={() => openEdit(item)}>Editar</Button><Button variant={item.status === "inactive" ? "secondary" : "danger"} loading={togglingIds.has(item.id)} disabled={togglingIds.size > 0 && !togglingIds.has(item.id) || saving} onPress={() => void toggleStatus(item)}>{item.status === "inactive" ? "Ativar" : "Inativar"}</Button></View>
+        <View style={styles.row}><Button variant="secondary" icon="edit-2" disabled={togglingIds.size > 0 || saving} onPress={() => openEdit(item)}>Editar</Button><Button variant={item.status === "inactive" ? "secondary" : "danger"} loading={togglingIds.has(item.id)} disabled={togglingIds.size > 0 && !togglingIds.has(item.id) || saving} onPress={() => void toggleStatus(item)}>{item.status === "inactive" ? "Ativar" : "Inativar"}</Button><Button variant="danger" icon="trash-2" disabled={togglingIds.size > 0 || saving} onPress={() => confirmDelete(item)}>Excluir</Button></View>
       </Card>) : null}
     </Screen>
   );

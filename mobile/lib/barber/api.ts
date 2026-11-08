@@ -223,6 +223,9 @@ export const api = {
   userSave(input: SaveUserInput) {
     return request<{ user: BarberUser }>("user_save", { method: "POST", body: input });
   },
+  userDelete(userId: number) {
+    return request<{ deleted_user_id: number }>("user_delete", { method: "POST", body: { id: userId } });
+  },
   services() {
     return request<ServiceListResponse>("services");
   },
