@@ -3,7 +3,7 @@ import { Text, View } from "react-native";
 
 import { api } from "@/lib/barber/api";
 import { useBarber } from "@/lib/barber/context";
-import type { AvailabilitySlot, Catalog } from "@/lib/barber/types";
+import type { AvailabilitySlot, BarberUser, Catalog } from "@/lib/barber/types";
 import { bookingSelectionKey, formatBRL, formatTime, nextDateKeys } from "@/lib/barber/utils";
 import {
   BARBER_COLORS,
@@ -24,6 +24,8 @@ export default function BookingScreen() {
   const { authReady, user } = useBarber();
   const dates = useMemo(() => nextDateKeys(), []);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
+  const [clients, setClients] = useState<BarberUser[]>([]);
+  const [clientId, setClientId] = useState<number | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [serviceId, setServiceId] = useState<number | null>(null);
@@ -52,14 +54,20 @@ export default function BookingScreen() {
   }, [selectionKey, selectedSlotKey]);
 
   async function loadCatalog() {
-    if (!user || user.role !== "client") return;
+    if (!user || (user.role !== "client" && user.role !== "barber")) return;
     setCatalogLoading(true);
     setCatalogError(null);
     try {
       const result = await api.catalog();
       setCatalog(result);
+      if (user.role === "barber") {
+        const clientsResult = await api.users("client");
+        setClients(clientsResult.users ?? []);
+        if (!barberId) setBarberId(user.id);
+      } else if (!barberId && result.barbers[0]) {
+        setBarberId(result.barbers[0].id);
+      }
       if (!serviceId && result.services[0]) setServiceId(result.services[0].id);
-      if (!barberId && result.barbers[0]) setBarberId(result.barbers[0].id);
     } catch (error) {
       setCatalogError(error instanceof Error ? error.message : "Não foi possível carregar o catálogo.");
     } finally {
@@ -68,7 +76,7 @@ export default function BookingScreen() {
   }
 
   useEffect(() => {
-    if (!authReady || !user || user.role !== "client") return;
+    if (!authReady || !user || (user.role !== "client" && user.role !== "barber")) return;
     const timer = setTimeout(() => void loadCatalog(), 0);
     return () => clearTimeout(timer);
     // Catalog is loaded once per authenticated client; selection effects only query availability.
@@ -88,7 +96,7 @@ export default function BookingScreen() {
   }
 
   useEffect(() => {
-    if (!authReady || !user || user.role !== "client" || !serviceId || !barberId || !date) {
+    if (!authReady || !user || (user.role !== "client" && user.role !== "barber") || !serviceId || !barberId || !date || (user.role === "barber" && !clientId)) {
       return;
     }
     const requestSequence = availabilitySequenceRef.current;
@@ -117,7 +125,7 @@ export default function BookingScreen() {
       active = false;
       clearTimeout(timer);
     };
-  }, [authReady, user, date, barberId, serviceId, selectionKey, availabilityRetry]);
+  }, [authReady, user, date, barberId, serviceId, clientId, selectionKey, availabilityRetry]);
 
   function retryAvailability() {
     invalidateSelection();
@@ -139,6 +147,7 @@ export default function BookingScreen() {
     const slotAtStart = selectedSlot;
     try {
       const result = await api.appointmentCreate({
+        ...(user?.role === "barber" && clientId ? { client_id: clientId } : {}),
         barber_id: barberId,
         service_id: serviceId,
         starts_at: slotAtStart.starts_at,
@@ -166,7 +175,7 @@ export default function BookingScreen() {
     setSubmitError(null);
   }
 
-  if (!authReady || !user || user.role !== "client") return null;
+  if (!authReady || !user || (user.role !== "client" && user.role !== "barber")) return null;
 
   if (success) {
     return (
@@ -197,25 +206,37 @@ export default function BookingScreen() {
             </View>
             {serviceId ? <Text style={styles.muted}>{catalog.services.find((item) => item.id === serviceId)?.duration_minutes ?? "—"} minutos de duração</Text> : null}
           </Card>
+          {user.role === "barber" ? (
+            <Card><Text style={styles.sectionTitle}>2. Barbeiro</Text><Text style={styles.muted}>Este atendimento será criado para você: {user.name}.</Text></Card>
+          ) : (
+            <Card>
+              <Text style={styles.sectionTitle}>2. Barbeiro</Text>
+              <View style={styles.wrap}>
+                {catalog.barbers.length ? catalog.barbers.map((barber) => <ChoiceChip key={barber.id} label={barber.name} selected={barber.id === barberId} disabled={submitting} onPress={() => { invalidateSelection(); setBarberId(barber.id); }} />) : <Text style={styles.muted}>Nenhum barbeiro disponível.</Text>}
+              </View>
+            </Card>
+          )}
+          {user.role === "barber" ? (
+            <Card>
+              <Text style={styles.sectionTitle}>3. Cliente</Text>
+              <View style={styles.wrap}>
+                {clients.length ? clients.map((client) => <ChoiceChip key={client.id} label={client.phone ? `${client.name} · ${client.phone}` : client.name} selected={client.id === clientId} disabled={submitting} onPress={() => { invalidateSelection(); setClientId(client.id); }} />) : <Text style={styles.muted}>Nenhum cliente ativo disponível.</Text>}
+              </View>
+            </Card>
+          ) : null}
           <Card>
-            <Text style={styles.sectionTitle}>2. Barbeiro</Text>
-            <View style={styles.wrap}>
-              {catalog.barbers.length ? catalog.barbers.map((barber) => <ChoiceChip key={barber.id} label={barber.name} selected={barber.id === barberId} disabled={submitting} onPress={() => { invalidateSelection(); setBarberId(barber.id); }} />) : <Text style={styles.muted}>Nenhum barbeiro disponível.</Text>}
-            </View>
-          </Card>
-          <Card>
-            <Text style={styles.sectionTitle}>3. Data</Text>
+            <Text style={styles.sectionTitle}>{user.role === "barber" ? "4. Data" : "3. Data"}</Text>
             <DateStrip dates={dates} selected={date} onSelect={(value) => { if (!submitting) { invalidateSelection(); setDate(value); } }} />
           </Card>
           <Card>
-            <Text style={styles.sectionTitle}>4. Horário disponível</Text>
+            <Text style={styles.sectionTitle}>{user.role === "barber" ? "5. Horário disponível" : "4. Horário disponível"}</Text>
             {slotsLoading ? <LoadingState label="Buscando horários..." /> : null}
             {!slotsLoading && slotsError ? <ErrorState message={slotsError} onRetry={retryAvailability} /> : null}
             {!slotsLoading && !slotsError && !slots.length ? <Text style={styles.muted}>Nenhum horário disponível para esta combinação.</Text> : null}
             {!slotsLoading && slots.length ? <View style={styles.wrap}>{slots.map((slot) => <ChoiceChip key={`${slot.starts_at}-${slot.ends_at}`} label={formatTime(slot.starts_at)} selected={selectedSlot?.starts_at === slot.starts_at} disabled={submitting} onPress={() => { setSelectedSlot(slot); setSelectedSlotKey(selectionKeyRef.current); setSubmitError(null); }} />)}</View> : null}
           </Card>
           <Card>
-            <Text style={styles.sectionTitle}>5. Observações (opcional)</Text>
+            <Text style={styles.sectionTitle}>{user.role === "barber" ? "6. Observações (opcional)" : "5. Observações (opcional)"}</Text>
             <Field label="Recado para o barbeiro" value={notes} onChangeText={setNotes} placeholder="Ex.: preferência de acabamento" multiline maxLength={300} />
             {submitError ? <Notice tone="danger">{submitError}</Notice> : null}
             <Button onPress={() => void confirmBooking()} loading={submitting} disabled={!selectedSlot} icon="check">Confirmar agendamento</Button>

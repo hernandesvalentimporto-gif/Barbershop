@@ -7,13 +7,15 @@ export function tabAccessRedirect(
   authReady: boolean,
 ): "/" | null {
   if (!authReady) return null;
-  const clientRoute = route === "booking" || route === "history";
+  const clientRoute = route === "history";
+  const bookingRoute = route === "booking";
   const staffRoute = route === "agenda";
   const adminRoute = route === "clients" || route === "services";
-  const protectedRoute = clientRoute || staffRoute || adminRoute || route === "more";
+  const protectedRoute = clientRoute || bookingRoute || staffRoute || adminRoute || route === "more";
   if (!protectedRoute) return null;
   if (!role) return "/";
   if (clientRoute && role !== "client") return "/";
+  if (bookingRoute && role !== "client" && role !== "barber") return "/";
   if (staffRoute && role !== "barber" && role !== "admin") return "/";
   if (adminRoute && role !== "admin") return "/";
   return null;

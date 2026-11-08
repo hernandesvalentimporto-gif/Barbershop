@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "expo-router";
 import { Text, View } from "react-native";
 
 import { api, isEndpointMissing } from "@/lib/barber/api";
@@ -30,6 +31,7 @@ import {
 
 export default function AgendaScreen() {
   const { authReady, user } = useBarber();
+  const router = useRouter();
   const dates = useMemo(() => nextDateKeys(), []);
   const [date, setDate] = useState(dates[0]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -101,7 +103,7 @@ export default function AgendaScreen() {
   if (!authReady || !user || (user.role !== "barber" && user.role !== "admin")) return null;
   return (
     <Screen>
-      <Header title="Agenda" subtitle={user.role === "admin" ? "Acompanhe os atendimentos da equipe." : "Seus atendimentos e respectivos status."} right={<Button variant="ghost" icon="refresh-cw" onPress={() => void load()}>Atualizar</Button>} />
+      <Header title="Agenda" subtitle={user.role === "admin" ? "Acompanhe os atendimentos da equipe." : "Seus atendimentos e respectivos status."} right={<View style={styles.row}><Button variant="ghost" icon="refresh-cw" onPress={() => void load()}>Atualizar</Button><Button icon="plus" onPress={() => router.push("/booking")}>Novo</Button></View>} />
       <Card>
         <Text style={styles.sectionTitle}>Escolha a data</Text>
         <DateStrip dates={dates} selected={date} onSelect={setDate} />

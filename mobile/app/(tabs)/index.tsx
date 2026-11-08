@@ -61,7 +61,7 @@ function LoginScreen() {
           onChangeText={setIdentifier}
           autoCapitalize="none"
           autoCorrect={false}
-          keyboardType="phone-pad"
+          keyboardType="email-address"
           textContentType="username"
           placeholder="(00) 00000-0000 ou e-mail"
           onFocus={clearAuthError}
