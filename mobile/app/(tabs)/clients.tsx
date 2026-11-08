@@ -116,7 +116,7 @@ export default function ClientsScreen() {
       if (!editing && role === "client" && saved.user.phone) {
         const digits = saved.user.phone.replace(/\D/g, "");
         const link = "https://github.com/hernandesvalentimporto-gif/Barbershop/releases/latest/download/BarberShop-SistemasHP-Teste-v2.apk";
-        const text = `Olá ${saved.user.name}! Seu acesso está pronto.\n\nBaixe o aplicativo: ${link}\nWhatsApp: ${saved.user.phone}\nSenha: ${password}`;
+        const text = `Olá ${saved.user.name}! Seu acesso à barbearia está pronto.\n\nUsuário: ${saved.user.phone}\nSenha: ${password}\n\nBaixe o aplicativo: ${link}`;
         setInviteUrl(`https://wa.me/${digits}?text=${encodeURIComponent(text)}`);
       }
       setNotice(editing ? "Usuário atualizado após confirmação do servidor." : "Usuário criado após confirmação do servidor.");
