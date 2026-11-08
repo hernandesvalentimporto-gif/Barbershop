@@ -541,7 +541,7 @@
             el('strong', { text: 'Baixe o aplicativo para o cliente' }),
             el('p', { text: 'Use o mesmo acesso de WhatsApp e senha no celular.' }),
             el('div', { className: 'download-actions' }, [
-                el('a', { className: 'button block', href: 'https://github.com/hernandesvalentimporto-gif/Barbershop/releases/latest', target: '_blank', rel: 'noopener', text: 'Android (APK)' }),
+                el('a', { className: 'button block', href: 'https://github.com/hernandesvalentimporto-gif/Barbershop/releases/latest/download/BarberShop-SistemasHP-Teste-v2.apk', target: '_blank', rel: 'noopener', text: 'Android (APK)' }),
                 el('button', { className: 'button secondary block', type: 'button', disabled: true, text: 'iPhone (em breve)' })
             ])
         ]);
