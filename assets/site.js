@@ -1238,7 +1238,7 @@
             return;
         }
         clear(content);
-        const newButton = isAdmin ? button('＋ Novo atendimento', 'button') : isClient ? button('＋ Agendar horário', 'button') : null;
+        const newButton = isAdmin || isBarber ? button('＋ Novo atendimento', 'button') : isClient ? button('＋ Agendar horário', 'button') : null;
         content.append(pageIntro('Agenda', isAdmin ? 'Uma visão diária dos atendimentos da barbearia.' : isBarber ? 'Seus atendimentos organizados por horário.' : 'Seus horários confirmados e pendentes, organizados como uma agenda.', newButton ? [newButton] : []));
         const toolbar = el('div', { className: 'toolbar' });
         const dateInput = input('date', 'agenda-date', date, { max: '', 'aria-label': 'Data da agenda' });
@@ -1263,14 +1263,14 @@
         else appointments.forEach((item) => calendar.append(calendarEvent(item, isClient ? 'client' : isAdmin ? 'admin' : 'barber')));
         content.append(calendar);
         wireStatusButtons(content);
-        if (isAdmin) {
-            const panel = el('section', { id: 'admin-booking-panel', className: 'card form-card', hidden: true });
+        if (isAdmin || isBarber) {
+            const panel = el('section', { id: 'staff-booking-panel', className: 'card form-card', hidden: true });
             content.append(panel);
             if (newButton) newButton.addEventListener('click', () => {
                 if (panel.hidden) {
                     panel.hidden = false;
                     newButton.textContent = 'Fechar novo atendimento';
-                    renderAdminBookingForm(panel, date);
+                    renderAdminBookingForm(panel, date, isAdmin);
                     panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 } else {
                     panel.hidden = true;
@@ -1287,25 +1287,25 @@
         if (panel) panel.hidden = !panel.hidden;
     }
 
-    async function renderAdminBookingForm(panel, date) {
+    async function renderAdminBookingForm(panel, date, admin = true) {
         clear(panel);
         panel.append(el('h3', { text: 'Novo atendimento' }), el('p', { text: 'Selecione cliente, barbeiro, serviço e um horário retornado pela disponibilidade real.' }), el('div', { className: 'form-message', text: 'Carregando opções...' }));
         try {
             const [clientsResult, barbersResult, servicesResult] = await Promise.all([
                 api('users', { params: { role: 'client' } }),
-                api('users', { params: { role: 'barber' } }),
+                admin ? api('users', { params: { role: 'barber' } }) : Promise.resolve({ users: [] }),
                 api('services')
             ]);
             buildBookingForm(panel, {
                 admin: true,
                 date,
                 clients: (clientsResult.users || []).filter((item) => item.status === 'active'),
-                barbers: (barbersResult.users || []).filter((item) => item.status === 'active'),
+                barbers: admin ? (barbersResult.users || []).filter((item) => item.status === 'active') : [state.user],
                 services: (servicesResult.services || []).filter((item) => Number(item.active) === 1)
             });
         } catch (error) {
             clear(panel);
-            panel.append(el('h3', { text: 'Novo atendimento' }), pageError(error, () => renderAdminBookingForm(panel, date)));
+            panel.append(el('h3', { text: 'Novo atendimento' }), pageError(error, () => renderAdminBookingForm(panel, date, admin)));
         }
     }
 

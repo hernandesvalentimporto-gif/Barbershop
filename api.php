@@ -596,11 +596,16 @@ function apiEscapeLike(string $value): string
 function handleUsers(PDO $pdo, string $prefix, array $user): never
 {
     apiRequireMethod('GET');
-    if ($user['role'] !== 'admin') {
+    if ($user['role'] !== 'admin' && $user['role'] !== 'barber') {
         apiError('forbidden', 403);
     }
     $role = isset($_GET['role']) ? trim((string)$_GET['role']) : '';
-    if ($role !== '' && !in_array($role, ['client', 'barber'], true)) {
+    if ($user['role'] === 'barber') {
+        if ($role !== '' && $role !== 'client') {
+            apiError('invalid_role', 422);
+        }
+        $role = 'client';
+    } elseif ($role !== '' && !in_array($role, ['client', 'barber'], true)) {
         apiError('invalid_role', 422);
     }
     $search = trim((string)($_GET['search'] ?? ''));
