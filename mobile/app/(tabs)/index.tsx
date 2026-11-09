@@ -1,7 +1,7 @@
 import Feather from "@expo/vector-icons/Feather";
 import React, { useEffect, useState } from "react";
 import { Linking, Pressable, Text, View } from "react-native";
-import { useRouter } from "expo-router";
+import { Redirect, useRouter } from "expo-router";
 
 import { api } from "@/lib/barber/api";
 import { useBarber } from "@/lib/barber/context";
@@ -209,5 +209,10 @@ export default function IndexScreen() {
   if (authStatus === "restore_error" && !user) {
     return <Screen contentStyle={{ justifyContent: "center" }}><BrandHeader subtitle="Sua agenda, do seu jeito" /><ErrorState message={authError ?? "Não foi possível restaurar a sessão."} onRetry={() => void retryRestore()} /></Screen>;
   }
-  return user ? <HomeScreen /> : <LoginScreen />;
+  if (user) {
+    if (user.platform_admin && !user.barbershop_id) return <Redirect href="/master" />;
+    if (user.role === "barber" || user.role === "admin") return <Redirect href="/agenda" />;
+    return <Redirect href="/booking" />;
+  }
+  return <LoginScreen />;
 }

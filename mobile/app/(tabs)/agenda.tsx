@@ -12,6 +12,7 @@ import {
   formatDateTime,
   legalAppointmentStatusTransitions,
   nextDateKeys,
+  statusLabel,
   type AppointmentActionStatus,
 } from "@/lib/barber/utils";
 import {
@@ -129,7 +130,7 @@ export default function AgendaScreen() {
             {typeof appointment.price_cents === "number" ? <Text style={styles.gold}>{formatBRL(appointment.price_cents)}</Text> : null}
             {appointment.notes ? <Text style={styles.muted}>Observação: {appointment.notes}</Text> : null}
             {allowedStatuses.length ? <View style={styles.wrap}>
-              {allowedStatuses.map((status) => <ChoiceChip key={status} label={status.replace("_", " ")} selected={false} disabled={changingIds.has(appointment.id)} onPress={() => void changeStatus(appointment, status)} />)}
+              {allowedStatuses.map((status) => <ChoiceChip key={status} label={statusLabel(status)} selected={false} disabled={changingIds.has(appointment.id)} onPress={() => void changeStatus(appointment, status)} />)}
             </View> : null}
           </Card>
         );
