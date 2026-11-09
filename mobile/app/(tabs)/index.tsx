@@ -84,7 +84,7 @@ function LoginScreen() {
               accessibilityRole="button"
               accessibilityLabel={showPassword ? "Ocultar senha" : "Mostrar senha"}
               onPress={() => setShowPassword((current) => !current)}
-              style={{ position: "absolute", right: 4, top: 3, minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center" }}
+              style={{ position: "absolute", right: 0, top: 0, width: 43, height: 43, alignItems: "center", justifyContent: "center" }}
             >
               <Feather name={showPassword ? "eye-off" : "eye"} size={20} color={BARBER_COLORS.gold} />
             </Pressable>

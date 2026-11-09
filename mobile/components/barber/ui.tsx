@@ -141,7 +141,7 @@ export function Button({
 export function Field({ label, error, ...props }: TextInputProps & { label: string; error?: string }) {
   return (
     <View style={styles.fieldWrap}>
-      <Text style={styles.label}>{label}</Text>
+      {label ? <Text style={styles.label}>{label}</Text> : null}
       <TextInput
         {...props}
         placeholderTextColor={BARBER_COLORS.textMuted}
