@@ -69,6 +69,42 @@ function apiInternalClientEmail(string $phone): string
     return 'client+' . $phone . '@barbershop.invalid';
 }
 
+function apiDefaultWorkSchedule(): array
+{
+    return [
+        'mon' => ['enabled' => true, 'start' => '09:00', 'end' => '18:00'],
+        'tue' => ['enabled' => true, 'start' => '09:00', 'end' => '18:00'],
+        'wed' => ['enabled' => true, 'start' => '09:00', 'end' => '18:00'],
+        'thu' => ['enabled' => true, 'start' => '09:00', 'end' => '18:00'],
+        'fri' => ['enabled' => true, 'start' => '09:00', 'end' => '18:00'],
+        'sat' => ['enabled' => true, 'start' => '09:00', 'end' => '14:00'],
+        'sun' => ['enabled' => false, 'start' => '09:00', 'end' => '18:00'],
+    ];
+}
+
+function apiNormalizeWorkSchedule(mixed $value): array
+{
+    $base = apiDefaultWorkSchedule();
+    if (!is_array($value)) return $base;
+    foreach ($base as $day => $defaults) {
+        $item = is_array($value[$day] ?? null) ? $value[$day] : [];
+        $start = is_string($item['start'] ?? null) && preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $item['start']) ? $item['start'] : $defaults['start'];
+        $end = is_string($item['end'] ?? null) && preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $item['end']) ? $item['end'] : $defaults['end'];
+        $enabled = filter_var($item['enabled'] ?? $defaults['enabled'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+        $base[$day] = ['enabled' => $enabled ?? $defaults['enabled'], 'start' => $start, 'end' => $end];
+    }
+    return $base;
+}
+
+function apiWorkScheduleResponse(mixed $value): array
+{
+    if (is_string($value)) {
+        $decoded = json_decode($value, true);
+        return apiNormalizeWorkSchedule($decoded);
+    }
+    return apiNormalizeWorkSchedule($value);
+}
+
 function apiEnsureApplicationSchema(PDO $pdo, string $prefix): void
 {
     static $checked = [];
@@ -84,6 +120,11 @@ function apiEnsureApplicationSchema(PDO $pdo, string $prefix): void
         $quoted = '`' . str_replace('`', '', $table) . '`';
         $pdo->exec("ALTER TABLE {$quoted} ADD COLUMN phone VARCHAR(20) NULL AFTER email");
         $pdo->exec("ALTER TABLE {$quoted} ADD KEY idx_" . preg_replace('/[^A-Za-z0-9_]/', '', $prefix) . "users_phone (phone)");
+    }
+    $column->execute([$table, 'work_schedule']);
+    if ((int)$column->fetchColumn() === 0) {
+        $quoted = '`' . str_replace('`', '', $table) . '`';
+        $pdo->exec("ALTER TABLE {$quoted} ADD COLUMN work_schedule JSON NULL AFTER status");
     }
     // Existing installations created before tenant isolation may have a single
     // barbershop and users without a tenant. Repair only that unambiguous case.
@@ -215,6 +256,7 @@ function apiValidateUserPayload(array $payload, bool $isUpdate = false, array $e
         'phone' => $phone,
         'role' => $roleValue,
         'status' => $statusValue,
+        'work_schedule' => $roleValue === 'barber' ? apiNormalizeWorkSchedule($payload['work_schedule'] ?? ($existing['work_schedule'] ?? null)) : null,
     ];
 
     if (array_key_exists('password', $payload)) {
@@ -513,7 +555,7 @@ function authenticatedUser(PDO $pdo, string $prefix): array
     }
 
     ensureSessions($pdo, $prefix);
-    $stmt = $pdo->prepare("SELECT u.id, u.name, u.email, u.phone, u.role, u.status, u.platform_admin, u.barbershop_id
+    $stmt = $pdo->prepare("SELECT u.id, u.name, u.email, u.phone, u.role, u.status, u.work_schedule, u.platform_admin, u.barbershop_id
         FROM `{$prefix}sessions` s
         INNER JOIN `{$prefix}users` u ON u.id = s.user_id
         WHERE s.token_hash = ? AND s.expires_at > UTC_TIMESTAMP() AND u.status = 'active'
@@ -549,7 +591,7 @@ function apiTenantId(array $user): int
 
 function apiFetchUser(PDO $pdo, string $prefix, int $id, ?int $tenantId = null): ?array
 {
-    $sql = "SELECT id, name, email, phone, password_hash, role, status, barbershop_id FROM `{$prefix}users` WHERE id = ?";
+    $sql = "SELECT id, name, email, phone, password_hash, role, status, work_schedule, barbershop_id FROM `{$prefix}users` WHERE id = ?";
     $params = [$id];
     if ($tenantId !== null) { $sql .= ' AND barbershop_id = ?'; $params[] = $tenantId; }
     $sql .= ' LIMIT 1';
@@ -630,7 +672,7 @@ function handleUsers(PDO $pdo, string $prefix, array $user): never
     }
 
     $tenantId = apiTenantId($user);
-    $sql = "SELECT id, name, email, phone, role, status FROM `{$prefix}users` WHERE barbershop_id = ? AND role IN ('client', 'barber')";
+    $sql = "SELECT id, name, email, phone, role, status, work_schedule FROM `{$prefix}users` WHERE barbershop_id = ? AND role IN ('client', 'barber')";
     $params = [$tenantId];
     if ($role !== '') {
         $sql .= ' AND role = ?';
@@ -654,6 +696,7 @@ function handleUsers(PDO $pdo, string $prefix, array $user): never
             'phone' => $row['phone'] === null ? null : (string)$row['phone'],
             'role' => (string)$row['role'],
             'status' => (string)$row['status'],
+            'work_schedule' => (string)$row['role'] === 'barber' ? apiWorkScheduleResponse($row['work_schedule'] ?? null) : null,
         ];
     }
     jsonResponse(['ok' => true, 'users' => $users]);
@@ -705,7 +748,7 @@ function handleUserSave(PDO $pdo, string $prefix, array $currentUser): never
 
     try {
         if ($id === null) {
-            $stmt = $pdo->prepare("INSERT INTO `{$prefix}users` (barbershop_id, name, email, phone, password_hash, role, status) VALUES (?, ?, ?, ?, ?, ?, ?)");
+            $stmt = $pdo->prepare("INSERT INTO `{$prefix}users` (barbershop_id, name, email, phone, password_hash, role, status, work_schedule) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
             $stmt->execute([
                 $tenantId,
                 $validated['name'],
@@ -714,11 +757,12 @@ function handleUserSave(PDO $pdo, string $prefix, array $currentUser): never
                 password_hash((string)$validated['password'], PASSWORD_DEFAULT),
                 $validated['role'],
                 $validated['status'],
+                $validated['work_schedule'] === null ? null : json_encode($validated['work_schedule'], JSON_THROW_ON_ERROR),
             ]);
             $id = (int)$pdo->lastInsertId();
         } else {
-            $fields = ['name = ?', 'email = ?', 'phone = ?', 'role = ?', 'status = ?'];
-            $params = [$validated['name'], $validated['email'], $validated['phone'], $validated['role'], $validated['status']];
+            $fields = ['name = ?', 'email = ?', 'phone = ?', 'role = ?', 'status = ?', 'work_schedule = ?'];
+            $params = [$validated['name'], $validated['email'], $validated['phone'], $validated['role'], $validated['status'], $validated['work_schedule'] === null ? null : json_encode($validated['work_schedule'], JSON_THROW_ON_ERROR)];
             if (array_key_exists('password', $validated)) {
                 $fields[] = 'password_hash = ?';
                 $params[] = password_hash((string)$validated['password'], PASSWORD_DEFAULT);
@@ -748,6 +792,7 @@ function handleUserSave(PDO $pdo, string $prefix, array $currentUser): never
             'phone' => $saved['phone'] === null ? null : (string)$saved['phone'],
             'role' => (string)$saved['role'],
             'status' => (string)$saved['status'],
+            'work_schedule' => (string)$saved['role'] === 'barber' ? apiWorkScheduleResponse($saved['work_schedule'] ?? null) : null,
         ],
     ], $existing ? 200 : 201);
 }
@@ -1187,7 +1232,7 @@ function handleCatalog(PDO $pdo, string $prefix, array $user): never
     $tenantId = apiTenantId($user);
     $stmt = $pdo->prepare("SELECT id, name, duration_minutes, price_cents FROM `{$prefix}services` WHERE barbershop_id = ? AND active = 1 ORDER BY name ASC, id ASC");
     $stmt->execute([$tenantId]); $services = $stmt->fetchAll();
-    $stmt = $pdo->prepare("SELECT id, name FROM `{$prefix}users` WHERE barbershop_id = ? AND role = 'barber' AND status = 'active' ORDER BY name ASC, id ASC");
+    $stmt = $pdo->prepare("SELECT id, name, work_schedule FROM `{$prefix}users` WHERE barbershop_id = ? AND role = 'barber' AND status = 'active' ORDER BY name ASC, id ASC");
     $stmt->execute([$tenantId]); $barbers = $stmt->fetchAll();
     foreach ($services as &$service) {
         $service['id'] = (int)$service['id'];
@@ -1197,6 +1242,7 @@ function handleCatalog(PDO $pdo, string $prefix, array $user): never
     unset($service);
     foreach ($barbers as &$barber) {
         $barber['id'] = (int)$barber['id'];
+        $barber['work_schedule'] = apiWorkScheduleResponse($barber['work_schedule'] ?? null);
     }
     unset($barber);
     jsonResponse(['ok' => true, 'services' => $services, 'barbers' => $barbers]);
@@ -1217,9 +1263,10 @@ function handleAvailability(PDO $pdo, string $prefix, array $user): never
         apiError('invalid_availability', 422);
     }
 
-    $barberStmt = $pdo->prepare("SELECT id FROM `{$prefix}users` WHERE id = ? AND barbershop_id = ? AND role = 'barber' AND status = 'active' LIMIT 1");
+    $barberStmt = $pdo->prepare("SELECT id, work_schedule FROM `{$prefix}users` WHERE id = ? AND barbershop_id = ? AND role = 'barber' AND status = 'active' LIMIT 1");
     $barberStmt->execute([$barberId, $tenantId]);
-    if ($barberStmt->fetchColumn() === false) {
+    $barberRow = $barberStmt->fetch();
+    if (!$barberRow) {
         apiError('barber_not_found', 404);
     }
     $service = apiFetchService($pdo, $prefix, $serviceId, false, $tenantId);
@@ -1227,6 +1274,14 @@ function handleAvailability(PDO $pdo, string $prefix, array $user): never
         apiError('service_not_found', 404);
     }
     $duration = (int)$service['duration_minutes'];
+    $schedule = apiWorkScheduleResponse($barberRow['work_schedule'] ?? null);
+    $dayKeys = [1 => 'mon', 2 => 'tue', 3 => 'wed', 4 => 'thu', 5 => 'fri', 6 => 'sat', 7 => 'sun'];
+    $daySchedule = $schedule[$dayKeys[(int)$date->format('N')]];
+    if (!$daySchedule['enabled']) { jsonResponse(['ok' => true, 'slots' => []]); }
+    [$startHour, $startMinute] = array_map('intval', explode(':', $daySchedule['start']));
+    [$endHour, $endMinute] = array_map('intval', explode(':', $daySchedule['end']));
+    $workStartMinutes = $startHour * 60 + $startMinute;
+    $workEndMinutes = $endHour * 60 + $endMinute;
     if ($duration < 5 || $duration > 480) {
         apiError('invalid_service', 422);
     }
@@ -1243,7 +1298,7 @@ function handleAvailability(PDO $pdo, string $prefix, array $user): never
     $busy = $appointments->fetchAll();
     $now = new DateTimeImmutable('now', apiTimezone());
     $slots = [];
-    for ($minutes = 9 * 60; $minutes <= 18 * 60 - $duration; $minutes += 30) {
+    for ($minutes = $workStartMinutes; $minutes <= $workEndMinutes - $duration; $minutes += 30) {
         $start = $date->setTime(intdiv($minutes, 60), $minutes % 60, 0);
         $end = $start->modify('+' . $duration . ' minutes');
         if ($start <= $now) {
