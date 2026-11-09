@@ -26,6 +26,9 @@ export default function BookingScreen() {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [clients, setClients] = useState<BarberUser[]>([]);
   const [clientId, setClientId] = useState<number | null>(null);
+  const [serviceSearch, setServiceSearch] = useState("");
+  const [barberSearch, setBarberSearch] = useState("");
+  const [clientSearch, setClientSearch] = useState("");
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [serviceId, setServiceId] = useState<number | null>(null);
@@ -48,6 +51,19 @@ export default function BookingScreen() {
   const selectedSlotKeyRef = useRef<string | null>(null);
   const confirmLockRef = useRef(false);
   const selectionKey = bookingSelectionKey({ date, barberId, serviceId });
+  const normalized = (value: string) => value.trim().toLocaleLowerCase("pt-BR");
+  const visibleServices = useMemo(() => {
+    const query = normalized(serviceSearch);
+    return (catalog?.services ?? []).filter((service) => !query || service.name.toLocaleLowerCase("pt-BR").includes(query));
+  }, [catalog?.services, serviceSearch]);
+  const visibleBarbers = useMemo(() => {
+    const query = normalized(barberSearch);
+    return (catalog?.barbers ?? []).filter((barber) => !query || barber.name.toLocaleLowerCase("pt-BR").includes(query));
+  }, [catalog?.barbers, barberSearch]);
+  const visibleClients = useMemo(() => {
+    const query = normalized(clientSearch);
+    return clients.filter((client) => !query || `${client.name} ${client.phone ?? ""}`.toLocaleLowerCase("pt-BR").includes(query));
+  }, [clients, clientSearch]);
 
   useEffect(() => {
     selectionKeyRef.current = selectionKey;
@@ -227,8 +243,9 @@ export default function BookingScreen() {
         <>
           <Card>
             <Text style={styles.sectionTitle}>1. Serviço</Text>
+            <Field label="Pesquisar serviço" value={serviceSearch} onChangeText={setServiceSearch} placeholder="Digite o nome do serviço" autoCapitalize="none" />
             <View style={styles.wrap}>
-              {catalog.services.length ? catalog.services.map((service) => <ChoiceChip key={service.id} label={`${service.name} · ${formatBRL(service.price_cents)}`} selected={service.id === serviceId} disabled={submitting} onPress={() => { invalidateSelection(); setServiceId(service.id); }} />) : <Text style={styles.muted}>Nenhum serviço disponível.</Text>}
+              {visibleServices.length ? visibleServices.map((service) => <ChoiceChip key={service.id} label={`${service.name} · ${formatBRL(service.price_cents)}`} selected={service.id === serviceId} disabled={submitting} onPress={() => { invalidateSelection(); setServiceId(service.id); }} />) : <Text style={styles.muted}>{catalog.services.length ? "Nenhum serviço encontrado para a busca." : "Nenhum serviço disponível."}</Text>}
             </View>
             {serviceId ? <Text style={styles.muted}>{catalog.services.find((item) => item.id === serviceId)?.duration_minutes ?? "—"} minutos de duração</Text> : null}
           </Card>
@@ -237,16 +254,18 @@ export default function BookingScreen() {
           ) : (
             <Card>
               <Text style={styles.sectionTitle}>2. Barbeiro</Text>
+              <Field label="Pesquisar barbeiro" value={barberSearch} onChangeText={setBarberSearch} placeholder="Digite o nome do barbeiro" autoCapitalize="words" />
               <View style={styles.wrap}>
-                {catalog.barbers.length ? catalog.barbers.map((barber) => <ChoiceChip key={barber.id} label={barber.name} selected={barber.id === barberId} disabled={submitting} onPress={() => { invalidateSelection(); setBarberId(barber.id); }} />) : <Text style={styles.muted}>Nenhum barbeiro disponível.</Text>}
+                {visibleBarbers.length ? visibleBarbers.map((barber) => <ChoiceChip key={barber.id} label={barber.name} selected={barber.id === barberId} disabled={submitting} onPress={() => { invalidateSelection(); setBarberId(barber.id); }} />) : <Text style={styles.muted}>{catalog.barbers.length ? "Nenhum barbeiro encontrado para a busca." : "Nenhum barbeiro disponível."}</Text>}
               </View>
             </Card>
           )}
           {user.role !== "client" ? (
             <Card>
               <Text style={styles.sectionTitle}>3. Cliente</Text>
+              <Field label="Pesquisar cliente" value={clientSearch} onChangeText={setClientSearch} placeholder="Digite nome ou WhatsApp" autoCapitalize="words" keyboardType="default" />
               <View style={styles.wrap}>
-                {clients.length ? clients.map((client) => <ChoiceChip key={client.id} label={client.phone ? `${client.name} · ${client.phone}` : client.name} selected={client.id === clientId} disabled={submitting} onPress={() => { invalidateSelection(); setClientId(client.id); }} />) : <Text style={styles.muted}>Nenhum cliente ativo disponível.</Text>}
+                {visibleClients.length ? visibleClients.map((client) => <ChoiceChip key={client.id} label={client.phone ? `${client.name} · ${client.phone}` : client.name} selected={client.id === clientId} disabled={submitting} onPress={() => { invalidateSelection(); setClientId(client.id); }} />) : <Text style={styles.muted}>{clients.length ? "Nenhum cliente encontrado para a busca." : "Nenhum cliente ativo disponível."}</Text>}
               </View>
             </Card>
           ) : null}
