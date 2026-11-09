@@ -1132,6 +1132,13 @@
                 ])
             ]);
             content.append(quick);
+            const adminAppointments = Array.isArray(data.appointments_list) ? data.appointments_list : [];
+            const agendaSection = el('section', { className: 'card section-card dashboard-agenda-card' }, [
+                el('h3', { text: 'Agenda de hoje' }),
+                el('p', { className: 'section-description', text: 'Cartões somente dos atendimentos do dia que está sendo acompanhado.' })
+            ]);
+            agendaSection.append(adminAppointments.length ? el('div', { className: 'appointment-list' }, adminAppointments.map((item) => appointmentCard(item, 'admin'))) : emptyState('Nenhum atendimento hoje', 'Os novos agendamentos aparecerão aqui.'));
+            content.append(agendaSection);
             return;
         }
         if (role === 'barber') {

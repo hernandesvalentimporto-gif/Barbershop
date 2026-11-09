@@ -1378,6 +1378,15 @@ function handleSummary(PDO $pdo, string $prefix, array $user): never
         }
         $appointmentCount = $pdo->prepare("SELECT COUNT(*) FROM `{$prefix}appointments` WHERE barbershop_id = ? AND starts_at >= ? AND starts_at < ?");
         $appointmentCount->execute([$tenantId, $todayStart, $tomorrowStart]);
+        $appointmentList = $pdo->prepare("SELECT a.id, a.starts_at, a.ends_at, a.status, a.price_cents,
+            c.name AS client_name, b.name AS barber_name, s.name AS service_name
+            FROM `{$prefix}appointments` a
+            LEFT JOIN `{$prefix}users` c ON c.id = a.client_id
+            LEFT JOIN `{$prefix}users` b ON b.id = a.barber_id
+            LEFT JOIN `{$prefix}services` s ON s.id = a.service_id
+            WHERE a.barbershop_id = ? AND a.starts_at >= ? AND a.starts_at < ?
+            ORDER BY a.starts_at ASC, a.id ASC LIMIT 20");
+        $appointmentList->execute([$tenantId, $todayStart, $tomorrowStart]);
         $response['data'] = [
             // Keep the old users key, but make all role counts explicit and real.
             'users' => $counts['admin'] + $counts['barber'] + $counts['client'],
@@ -1388,6 +1397,7 @@ function handleSummary(PDO $pdo, string $prefix, array $user): never
             'clients_active' => (int)($clientStats['active'] ?? 0),
             'clients_inactive' => (int)($clientStats['inactive'] ?? 0),
             'appointments' => (int)$appointmentCount->fetchColumn(),
+            'appointments_list' => $appointmentList->fetchAll(),
         ];
     } elseif ($user['role'] === 'barber') {
         $stmt = $pdo->prepare("SELECT COUNT(*) FROM `{$prefix}appointments`
