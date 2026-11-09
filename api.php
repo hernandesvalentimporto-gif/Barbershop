@@ -511,6 +511,19 @@ function authenticatedUser(PDO $pdo, string $prefix): array
     $user['barbershop_id'] = $user['barbershop_id'] === null ? null : (int)$user['barbershop_id'];
     // Legacy installations may have active non-platform users without a tenant.
     // Repair only the unambiguous legacy case: use the lowest existing shop id.
+    $billingTable = '`' . str_replace('`', '', $prefix . 'barbershop_billing') . '`';
+    $shopsTable = '`' . str_replace('`', '', $prefix . 'barbershops') . '`';
+    $pdo->exec("CREATE TABLE IF NOT EXISTS {$billingTable} (
+        barbershop_id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+        monthly_amount_cents INT UNSIGNED NOT NULL DEFAULT 3000,
+        status ENUM('paid','pending') NOT NULL DEFAULT 'pending',
+        due_date DATE NOT NULL,
+        paid_at DATETIME NULL,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        KEY idx_{$prefix}billing_status (status),
+        CONSTRAINT fk_{$prefix}billing_shop FOREIGN KEY (barbershop_id) REFERENCES {$shopsTable}(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    $pdo->exec("INSERT IGNORE INTO {$billingTable} (barbershop_id, due_date) SELECT id, CURRENT_DATE FROM {$shopsTable}");
     if ($user['barbershop_id'] === null && (int)($user['platform_admin'] ?? 0) === 0) {
         $shopId = $pdo->query("SELECT MIN(id) FROM `" . str_replace('`', '', $prefix . 'barbershops') . "`")->fetchColumn();
         if ($shopId !== false && $shopId !== null) {
@@ -776,6 +789,60 @@ function handleUserDelete(PDO $pdo, string $prefix, array $currentUser): never
         throw $exception;
     }
     jsonResponse(['ok' => true, 'deleted_user_id' => $id]);
+}
+
+function requirePlatformAdmin(array $user): void
+{
+    if ((int)($user['platform_admin'] ?? 0) !== 1 || ($user['barbershop_id'] ?? null) !== null) {
+        apiError('forbidden', 403);
+    }
+}
+
+function handleMasterDashboard(PDO $pdo, string $prefix, array $user): never
+{
+    apiRequireMethod('GET');
+    requirePlatformAdmin($user);
+    $shops = $pdo->query("SELECT b.id, b.name, b.created_at,
+        COALESCE(bi.monthly_amount_cents, 3000) AS monthly_amount_cents,
+        COALESCE(bi.status, 'pending') AS payment_status,
+        COALESCE(bi.due_date, CURRENT_DATE) AS due_date,
+        bi.paid_at,
+        (SELECT COUNT(*) FROM `{$prefix}users` u WHERE u.barbershop_id = b.id AND u.role = 'client') AS clients_count,
+        (SELECT COUNT(*) FROM `{$prefix}users` u WHERE u.barbershop_id = b.id AND u.role = 'barber') AS barbers_count
+        FROM `{$prefix}barbershops` b
+        LEFT JOIN `{$prefix}barbershop_billing` bi ON bi.barbershop_id = b.id
+        ORDER BY b.name ASC, b.id ASC")->fetchAll();
+    $result = [];
+    foreach ($shops as $shop) {
+        $result[] = [
+            'id' => (int)$shop['id'], 'name' => (string)$shop['name'],
+            'monthly_amount_cents' => (int)$shop['monthly_amount_cents'],
+            'payment_status' => (string)$shop['payment_status'],
+            'due_date' => (string)$shop['due_date'],
+            'paid_at' => $shop['paid_at'] === null ? null : (string)$shop['paid_at'],
+            'clients_count' => (int)$shop['clients_count'], 'barbers_count' => (int)$shop['barbers_count'],
+        ];
+    }
+    $paid = count(array_filter($result, static fn(array $item): bool => $item['payment_status'] === 'paid'));
+    jsonResponse(['ok' => true, 'plan_monthly_cents' => 3000, 'shops' => $result, 'totals' => ['shops' => count($result), 'paid' => $paid, 'pending' => count($result) - $paid]]);
+}
+
+function handleMasterBilling(PDO $pdo, string $prefix, array $user): never
+{
+    apiRequireMethod('POST');
+    requirePlatformAdmin($user);
+    $data = apiReadBody();
+    $shopId = apiPositiveId($data['barbershop_id'] ?? null);
+    $status = (string)($data['status'] ?? '');
+    if ($shopId === null || !in_array($status, ['paid', 'pending'], true)) {
+        apiError('invalid_billing', 422);
+    }
+    $exists = $pdo->prepare("SELECT id FROM `{$prefix}barbershops` WHERE id = ? LIMIT 1");
+    $exists->execute([$shopId]);
+    if ($exists->fetchColumn() === false) apiError('barbershop_not_found', 404);
+    $stmt = $pdo->prepare("INSERT INTO `{$prefix}barbershop_billing` (barbershop_id, monthly_amount_cents, status, due_date, paid_at) VALUES (?, 3000, ?, CURRENT_DATE, ?) ON DUPLICATE KEY UPDATE status = VALUES(status), paid_at = VALUES(paid_at), monthly_amount_cents = 3000");
+    $stmt->execute([$shopId, $status, $status === 'paid' ? date('Y-m-d H:i:s') : null]);
+    jsonResponse(['ok' => true, 'barbershop_id' => $shopId, 'status' => $status]);
 }
 
 function handleServices(PDO $pdo, string $prefix, array $user): never
@@ -1376,6 +1443,12 @@ function runApi(): never
         if ($action === 'me') {
             apiRequireMethod('GET');
             jsonResponse(['ok' => true, 'user' => $user]);
+        }
+        if ($action === 'master_dashboard') {
+            handleMasterDashboard($pdo, $prefix, $user);
+        }
+        if ($action === 'master_billing') {
+            handleMasterBilling($pdo, $prefix, $user);
         }
         if ($action === 'users') {
             handleUsers($pdo, $prefix, $user);
