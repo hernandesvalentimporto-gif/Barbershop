@@ -4,7 +4,7 @@ import { Text, View } from "react-native";
 
 import { api } from "@/lib/barber/api";
 import { useBarber } from "@/lib/barber/context";
-import type { BarberUser } from "@/lib/barber/types";
+import type { BarberUser, WorkDayKey, WorkSchedule } from "@/lib/barber/types";
 import {
   BARBER_COLORS,
   Button,
@@ -19,6 +19,20 @@ import {
   Screen,
   styles,
 } from "@/components/barber/ui";
+
+const WORK_DAYS: Array<{ key: WorkDayKey; label: string }> = [
+  { key: "mon", label: "Segunda" }, { key: "tue", label: "Terça" }, { key: "wed", label: "Quarta" },
+  { key: "thu", label: "Quinta" }, { key: "fri", label: "Sexta" }, { key: "sat", label: "Sábado" }, { key: "sun", label: "Domingo" },
+];
+const DEFAULT_WORK_SCHEDULE: WorkSchedule = {
+  mon: { enabled: true, start: "09:00", end: "18:00" }, tue: { enabled: true, start: "09:00", end: "18:00" },
+  wed: { enabled: true, start: "09:00", end: "18:00" }, thu: { enabled: true, start: "09:00", end: "18:00" },
+  fri: { enabled: true, start: "09:00", end: "18:00" }, sat: { enabled: true, start: "09:00", end: "14:00" },
+  sun: { enabled: false, start: "09:00", end: "18:00" },
+};
+function cloneSchedule(schedule?: WorkSchedule | null): WorkSchedule {
+  return JSON.parse(JSON.stringify(schedule ?? DEFAULT_WORK_SCHEDULE)) as WorkSchedule;
+}
 
 export default function ClientsScreen() {
   const { authReady, user } = useBarber();
@@ -36,6 +50,7 @@ export default function ClientsScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [status, setStatus] = useState<"active" | "inactive">("active");
+  const [workSchedule, setWorkSchedule] = useState<WorkSchedule>(cloneSchedule());
   const [saving, setSaving] = useState(false);
   const [togglingIds, setTogglingIds] = useState<Set<number>>(new Set());
   const saveLockRef = useRef(false);
@@ -70,6 +85,7 @@ export default function ClientsScreen() {
     setEmail("");
     setPassword("");
     setStatus("active");
+    setWorkSchedule(cloneSchedule());
     setFormError(null);
     setNotice(null);
   }
@@ -81,6 +97,7 @@ export default function ClientsScreen() {
     setEmail(item.email);
     setPassword("");
     setStatus(item.status === "inactive" ? "inactive" : "active");
+    setWorkSchedule(cloneSchedule(item.work_schedule));
     setFormError(null);
     setNotice(null);
     setInviteUrl(null);
@@ -112,6 +129,7 @@ export default function ClientsScreen() {
         role,
         status,
         ...(password ? { password } : {}),
+        ...(role === "barber" ? { work_schedule: workSchedule } : {}),
       });
       if (!editing && role === "client" && saved.user.phone) {
         const digits = saved.user.phone.replace(/\D/g, "");
@@ -208,6 +226,20 @@ export default function ClientsScreen() {
         <Field label="Nome" value={name} onChangeText={setName} placeholder="Nome completo" />
         <Field label={role === "client" ? "WhatsApp/telefone" : "E-mail"} value={role === "client" ? phone : email} onChangeText={role === "client" ? setPhone : setEmail} autoCapitalize="none" keyboardType={role === "client" ? "phone-pad" : "email-address"} placeholder={role === "client" ? "(00) 00000-0000" : "email@exemplo.com"} />
         <Field label={editing ? "Nova senha (opcional)" : "Senha inicial (mínimo 8 caracteres)"} value={password} onChangeText={setPassword} secureTextEntry placeholder="••••••••" />
+        {role === "barber" ? <Card style={{ gap: 10 }}>
+          <Text style={styles.sectionTitle}>Jornada semanal</Text>
+          <Text style={styles.muted}>Defina os dias e o horário em que este barbeiro atende. O cliente verá somente os horários livres dentro desta jornada.</Text>
+          {WORK_DAYS.map(({ key, label }) => {
+            const day = workSchedule[key];
+            return <View key={key} style={{ gap: 7 }}>
+              <View style={styles.row}><Text style={styles.label}>{label}</Text><ChoiceChip label={day.enabled ? "Trabalha" : "Fechado"} selected={day.enabled} disabled={saving} onPress={() => setWorkSchedule((current) => ({ ...current, [key]: { ...current[key], enabled: !current[key].enabled } }))} /></View>
+              {day.enabled ? <View style={styles.row}>
+                <View style={{ flex: 1 }}><Field label="Início" value={day.start} onChangeText={(value) => setWorkSchedule((current) => ({ ...current, [key]: { ...current[key], start: value } }))} keyboardType="numbers-and-punctuation" placeholder="08:00" /></View>
+                <View style={{ flex: 1 }}><Field label="Fim" value={day.end} onChangeText={(value) => setWorkSchedule((current) => ({ ...current, [key]: { ...current[key], end: value } }))} keyboardType="numbers-and-punctuation" placeholder="19:00" /></View>
+              </View> : <Text style={styles.muted}>Fechado neste dia</Text>}
+            </View>;
+          })}
+        </Card> : null}
         <View style={styles.wrap}><ChoiceChip label="Ativo" selected={status === "active"} disabled={saving} onPress={() => setStatus("active")} /><ChoiceChip label="Inativo" selected={status === "inactive"} disabled={saving} onPress={() => setStatus("inactive")} /></View>
         <View style={styles.row}><Button variant="ghost" disabled={saving} onPress={openNew}>Limpar</Button><Button onPress={() => void save()} loading={saving} icon="save">Salvar</Button></View>
       </Card>

@@ -1,5 +1,8 @@
 export type BarberRole = "client" | "barber" | "admin";
 export type UserStatus = "active" | "inactive" | string;
+export type WorkDayKey = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+export type WorkDay = { enabled: boolean; start: string; end: string };
+export type WorkSchedule = Record<WorkDayKey, WorkDay>;
 
 export type BarberUser = {
   id: number;
@@ -10,6 +13,7 @@ export type BarberUser = {
   status: UserStatus;
   platform_admin?: boolean;
   barbershop_id?: number | null;
+  work_schedule?: WorkSchedule | null;
 };
 
 export type Service = {
@@ -85,6 +89,7 @@ export type SaveUserInput = {
   role: "client" | "barber";
   status: "active" | "inactive";
   password?: string;
+  work_schedule?: WorkSchedule;
 };
 
 export type SaveServiceInput = {
