@@ -150,6 +150,17 @@ function apiEnsureApplicationSchema(PDO $pdo, string $prefix): void
         CONSTRAINT fk_{$safePrefix}billing_shop FOREIGN KEY (barbershop_id) REFERENCES {$shopsTable}(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
     $pdo->exec("INSERT IGNORE INTO {$billingTable} (barbershop_id, due_date) SELECT id, CURRENT_DATE FROM {$shopsTable}");
+    $appointmentsTable = '`' . str_replace('`', '', $prefix . 'appointments') . '`';
+    $servicesTable = '`' . str_replace('`', '', $prefix . 'services') . '`';
+    $appointmentServicesTable = '`' . str_replace('`', '', $prefix . 'appointment_services') . '`';
+    $pdo->exec("CREATE TABLE IF NOT EXISTS {$appointmentServicesTable} (
+        appointment_id BIGINT UNSIGNED NOT NULL,
+        service_id BIGINT UNSIGNED NOT NULL,
+        PRIMARY KEY (appointment_id, service_id),
+        KEY idx_" . $safePrefix . "appointment_services_service (service_id),
+        CONSTRAINT fk_" . $safePrefix . "appointment_services_appointment FOREIGN KEY (appointment_id) REFERENCES {$appointmentsTable}(id) ON DELETE CASCADE,
+        CONSTRAINT fk_" . $safePrefix . "appointment_services_service FOREIGN KEY (service_id) REFERENCES {$servicesTable}(id) ON DELETE RESTRICT
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 }
 
 function apiIntegerValue(mixed $value): ?int
@@ -998,15 +1009,29 @@ function apiAppointmentNotes(mixed $value): ?string
     return $notes === '' ? null : $notes;
 }
 
+function apiAppointmentServiceIds(array $data): array
+{
+    $raw = $data['service_ids'] ?? null;
+    if ($raw === null) $raw = [$data['service_id'] ?? null];
+    if (is_string($raw)) $raw = preg_split('/\s*,\s*/', $raw, -1, PREG_SPLIT_NO_EMPTY);
+    if (!is_array($raw)) apiError('invalid_appointment', 422);
+    $ids = [];
+    foreach ($raw as $value) {
+        $id = apiPositiveId($value);
+        if ($id === null || in_array($id, $ids, true)) apiError('invalid_appointment', 422);
+        $ids[] = $id;
+    }
+    if (!$ids || count($ids) > 20) apiError('invalid_appointment', 422);
+    return $ids;
+}
+
 function handleAppointmentCreate(PDO $pdo, string $prefix, array $currentUser): never
 {
     apiRequireMethod('POST');
     $tenantId = apiTenantId($currentUser);
     $data = apiReadBody();
-    $serviceId = apiPositiveId($data['service_id'] ?? null);
-    if ($serviceId === null) {
-        apiError('invalid_appointment', 422);
-    }
+    $serviceIds = apiAppointmentServiceIds($data);
+    $serviceId = $serviceIds[0];
 
     $requestedClientId = array_key_exists('client_id', $data) ? apiPositiveId($data['client_id']) : null;
     $requestedBarberId = array_key_exists('barber_id', $data) ? apiPositiveId($data['barber_id']) : null;
@@ -1071,12 +1096,15 @@ function handleAppointmentCreate(PDO $pdo, string $prefix, array $currentUser): 
             apiRollbackAndError($pdo, 'barber_not_found', 404);
         }
 
-        // Lock the service row for a consistent duration while calculating and inserting.
-        $service = apiFetchService($pdo, $prefix, (int)$serviceId, true, $tenantId);
-        if (!$service || (int)$service['active'] !== 1) {
-            apiRollbackAndError($pdo, 'service_not_found', 404);
+        // Lock every selected service and use the combined duration.
+        $services = [];
+        $duration = 0;
+        foreach ($serviceIds as $selectedServiceId) {
+            $service = apiFetchService($pdo, $prefix, (int)$selectedServiceId, true, $tenantId);
+            if (!$service || (int)$service['active'] !== 1) apiRollbackAndError($pdo, 'service_not_found', 404);
+            $services[] = $service;
+            $duration += (int)$service['duration_minutes'];
         }
-        $duration = (int)$service['duration_minutes'];
         $window = apiValidateAppointmentWindow($starts, $duration, $providedEnds);
         if (!$window['ok']) {
             apiRollbackAndError($pdo, (string)$window['error'], 422);
@@ -1113,6 +1141,8 @@ function handleAppointmentCreate(PDO $pdo, string $prefix, array $currentUser): 
             $notes,
         ]);
         $appointmentId = (int)$pdo->lastInsertId();
+        $serviceLink = $pdo->prepare("INSERT INTO `{$prefix}appointment_services` (appointment_id, service_id) VALUES (?, ?)");
+        foreach ($serviceIds as $selectedServiceId) $serviceLink->execute([$appointmentId, (int)$selectedServiceId]);
         $pdo->commit();
     } catch (Throwable $exception) {
         if ($pdo->inTransaction()) {
@@ -1254,7 +1284,8 @@ function handleAvailability(PDO $pdo, string $prefix, array $user): never
     $tenantId = apiTenantId($user);
     $dateValue = $_GET['date'] ?? null;
     $barberId = apiPositiveId($_GET['barber_id'] ?? null);
-    $serviceId = apiPositiveId($_GET['service_id'] ?? null);
+    $serviceIds = apiAppointmentServiceIds($_GET);
+    $serviceId = $serviceIds[0] ?? null;
     if (!is_string($dateValue) || $barberId === null || $serviceId === null) {
         apiError('invalid_availability', 422);
     }
@@ -1269,11 +1300,12 @@ function handleAvailability(PDO $pdo, string $prefix, array $user): never
     if (!$barberRow) {
         apiError('barber_not_found', 404);
     }
-    $service = apiFetchService($pdo, $prefix, $serviceId, false, $tenantId);
-    if (!$service || (int)$service['active'] !== 1) {
-        apiError('service_not_found', 404);
+    $duration = 0;
+    foreach ($serviceIds as $selectedServiceId) {
+        $service = apiFetchService($pdo, $prefix, $selectedServiceId, false, $tenantId);
+        if (!$service || (int)$service['active'] !== 1) apiError('service_not_found', 404);
+        $duration += (int)$service['duration_minutes'];
     }
-    $duration = (int)$service['duration_minutes'];
     $schedule = apiWorkScheduleResponse($barberRow['work_schedule'] ?? null);
     $dayKeys = [1 => 'mon', 2 => 'tue', 3 => 'wed', 4 => 'thu', 5 => 'fri', 6 => 'sat', 7 => 'sun'];
     $daySchedule = $schedule[$dayKeys[(int)$date->format('N')]];

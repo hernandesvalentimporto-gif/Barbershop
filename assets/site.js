@@ -1332,7 +1332,8 @@
         const form = el('form', { className: 'auth-form', novalidate: true });
         const dateInput = input('date', 'booking-date', options.date || saoPauloToday(), { required: true, min: saoPauloToday() });
         const barberSelect = selectInput('booking-barber', { required: true });
-        const serviceSelect = selectInput('booking-service', { required: true });
+        const serviceSelect = selectInput('booking-service', { required: true, multiple: true, size: 4 });
+        serviceSelect.setAttribute('aria-label', 'Selecione um ou mais serviços');
         const slotSelect = selectInput('booking-slot', { required: true, disabled: true });
         const notes = el('textarea', { id: 'booking-notes', maxlength: 500, placeholder: 'Opcional, até 500 caracteres' });
         addSelectOptions(barberSelect, options.barbers, 'Selecione o barbeiro');
@@ -1346,7 +1347,7 @@
         submit.type = 'submit';
         const grid = el('div', { className: 'form-grid three' });
         if (clientSelect) grid.append(field('Cliente', clientSelect));
-        grid.append(field('Data', dateInput), field('Barbeiro', barberSelect), field('Serviço', serviceSelect), field('Horário disponível', slotSelect), field('Observações', notes));
+        grid.append(field('Data', dateInput), field('Barbeiro', barberSelect), field('Serviços (selecione um ou mais)', serviceSelect), field('Horário disponível', slotSelect), field('Observações', notes));
         form.append(grid, message, el('div', { className: 'form-actions' }, [submit]));
         panel.append(el('h3', { text: options.admin ? 'Novo atendimento' : 'Agendar para mim' }), el('p', { text: options.admin ? 'O horário abaixo será consultado na API antes do salvamento.' : 'Escolha uma opção de horário retornada pela agenda.' }), form);
 
@@ -1356,13 +1357,14 @@
             slotSelect.appendChild(el('option', { value: '', text: 'Consultando horários...' }));
             message.className = 'form-message';
             message.textContent = '';
-            if (!dateInput.value || !barberSelect.value || !serviceSelect.value) {
+            const selectedServiceIds = Array.from(serviceSelect.selectedOptions).map((option) => option.value).filter(Boolean);
+            if (!dateInput.value || !barberSelect.value || !selectedServiceIds.length) {
                 clear(slotSelect);
                 slotSelect.appendChild(el('option', { value: '', text: 'Escolha data, barbeiro e serviço' }));
                 return;
             }
             try {
-                const result = await api('availability', { params: { date: dateInput.value, barber_id: barberSelect.value, service_id: serviceSelect.value } });
+                const result = await api('availability', { params: { date: dateInput.value, barber_id: barberSelect.value, service_ids: selectedServiceIds.join(',') } });
                 clear(slotSelect);
                 const slots = Array.isArray(result.slots) ? result.slots : [];
                 slotSelect.appendChild(el('option', { value: '', text: slots.length ? 'Selecione o horário' : 'Nenhum horário disponível' }));
@@ -1392,7 +1394,8 @@
             }
             const body = {
                 barber_id: Number(barberSelect.value),
-                service_id: Number(serviceSelect.value),
+                service_id: Number(Array.from(serviceSelect.selectedOptions)[0].value),
+                service_ids: Array.from(serviceSelect.selectedOptions).map((option) => Number(option.value)),
                 starts_at: selected.value,
                 ends_at: selected.dataset.endsAt,
                 notes: notes.value.trim()
