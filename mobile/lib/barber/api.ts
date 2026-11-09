@@ -187,15 +187,16 @@ export const api = {
   catalog() {
     return request<Catalog>("catalog");
   },
-  availability(date: string, barberId: number, serviceId: number) {
+  availability(date: string, barberId: number, serviceIds: number[]) {
     return request<{ slots: AvailabilitySlot[] }>("availability", {
-      query: { date, barber_id: barberId, service_id: serviceId },
+      query: { date, barber_id: barberId, service_ids: serviceIds.join(",") },
     });
   },
   appointmentCreate(input: {
     client_id?: number;
     barber_id: number;
     service_id: number;
+    service_ids?: number[];
     starts_at: string;
     ends_at: string;
     notes?: string;

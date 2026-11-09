@@ -32,6 +32,7 @@ export default function BookingScreen() {
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [serviceId, setServiceId] = useState<number | null>(null);
+  const [serviceIds, setServiceIds] = useState<number[]>([]);
   const [barberId, setBarberId] = useState<number | null>(null);
   const [date, setDate] = useState(dates[0]);
   const [slots, setSlots] = useState<AvailabilitySlot[]>([]);
@@ -50,7 +51,7 @@ export default function BookingScreen() {
   const selectionKeyRef = useRef("");
   const selectedSlotKeyRef = useRef<string | null>(null);
   const confirmLockRef = useRef(false);
-  const selectionKey = bookingSelectionKey({ date, barberId, serviceId });
+  const selectionKey = `${date}|barber:${barberId ?? "none"}|services:${serviceIds.join(",") || "none"}`;
   const normalized = (value: string) => value.trim().toLocaleLowerCase("pt-BR");
   const visibleServices = useMemo(() => {
     const query = normalized(serviceSearch);
@@ -84,7 +85,10 @@ export default function BookingScreen() {
       } else if (!barberId && result.barbers[0]) {
         setBarberId(result.barbers[0].id);
       }
-      if (!serviceId && result.services[0]) setServiceId(result.services[0].id);
+      if (!serviceIds.length && result.services[0]) {
+        setServiceIds([result.services[0].id]);
+        setServiceId(result.services[0].id);
+      }
     } catch (error) {
       setCatalogError(error instanceof Error ? error.message : "Não foi possível carregar o catálogo.");
     } finally {
@@ -113,7 +117,7 @@ export default function BookingScreen() {
   }
 
   useEffect(() => {
-    if (!authReady || !user || (user.role !== "client" && user.role !== "barber" && user.role !== "admin") || !serviceId || !barberId || !date || ((user.role === "barber" || user.role === "admin") && !clientId)) {
+    if (!authReady || !user || (user.role !== "client" && user.role !== "barber" && user.role !== "admin") || !serviceIds.length || !barberId || !date || ((user.role === "barber" || user.role === "admin") && !clientId)) {
       return;
     }
     const requestSequence = availabilitySequenceRef.current;
@@ -127,7 +131,7 @@ export default function BookingScreen() {
     const timer = setTimeout(() => {
       setSlotsLoading(true);
       setSlotsError(null);
-      api.availability(date, barberId, serviceId)
+      api.availability(date, barberId, serviceIds)
         .then((result) => {
           if (isCurrent()) setSlots(result.slots ?? []);
         })
@@ -142,7 +146,7 @@ export default function BookingScreen() {
       active = false;
       clearTimeout(timer);
     };
-  }, [authReady, user, date, barberId, serviceId, clientId, selectionKey, availabilityRetry]);
+  }, [authReady, user, date, barberId, serviceIds, clientId, selectionKey, availabilityRetry]);
 
   function retryAvailability() {
     invalidateSelection();
@@ -150,20 +154,20 @@ export default function BookingScreen() {
   }
 
   function buildManualSlot(): AvailabilitySlot | null {
-    if (!manualTime.match(/^([01]\d|2[0-3]):[0-5]\d$/) || !serviceId || !catalog) return null;
-    const service = catalog.services.find((item) => item.id === serviceId);
-    if (!service) return null;
+    if (!manualTime.match(/^([01]\d|2[0-3]):[0-5]\d$/) || !serviceIds.length || !catalog) return null;
+    const duration = serviceIds.reduce((total, id) => total + (catalog.services.find((item) => item.id === id)?.duration_minutes ?? 0), 0);
+    if (!duration) return null;
     const [hours, minutes] = manualTime.split(":").map(Number);
     const start = new Date(`${date}T${manualTime}:00`);
     if (Number.isNaN(start.getTime())) return null;
-    const end = new Date(start.getTime() + service.duration_minutes * 60_000);
+    const end = new Date(start.getTime() + duration * 60_000);
     const formatLocal = (value: Date) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")} ${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}:00`;
     void hours; void minutes;
     return { starts_at: formatLocal(start), ends_at: formatLocal(end) };
   }
 
   function staffTimeOptions(): string[] {
-    const duration = catalog?.services.find((item) => item.id === serviceId)?.duration_minutes ?? 30;
+    const duration = serviceIds.reduce((total, id) => total + (catalog?.services.find((item) => item.id === id)?.duration_minutes ?? 0), 0) || 30;
     const options: string[] = [];
     for (let minutes = 9 * 60; minutes <= 18 * 60 - duration; minutes += 30) {
       options.push(`${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`);
@@ -175,9 +179,9 @@ export default function BookingScreen() {
     const isStaff = user?.role === "barber" || user?.role === "admin";
     const manualSlot = isStaff ? buildManualSlot() : null;
     const slot = selectedSlot ?? manualSlot;
-    if (confirmLockRef.current || !slot || !serviceId || !barberId) return;
+    if (confirmLockRef.current || !slot || !serviceIds.length || !barberId) return;
     const keyAtStart = selectionKey;
-    if (selectedSlot && (selectedSlotKey !== keyAtStart || !bookingSelectionKey({ date, barberId, serviceId }))) {
+    if (selectedSlot && (selectedSlotKey !== keyAtStart || !serviceIds.length)) {
       setSelectedSlot(null);
       setSelectedSlotKey(null);
       setSubmitError("O horário selecionado não pertence mais à combinação atual. Escolha outro horário.");
@@ -191,7 +195,8 @@ export default function BookingScreen() {
       const result = await api.appointmentCreate({
         ...(user?.role !== "client" && clientId ? { client_id: clientId } : {}),
         barber_id: barberId,
-        service_id: serviceId,
+        service_id: serviceIds[0],
+        service_ids: serviceIds,
         starts_at: slotAtStart.starts_at,
         ends_at: slotAtStart.ends_at,
         notes: notes.trim() || undefined,
@@ -242,12 +247,21 @@ export default function BookingScreen() {
       {!catalogLoading && catalog ? (
         <>
           <Card>
-            <Text style={styles.sectionTitle}>1. Serviço</Text>
+            <Text style={styles.sectionTitle}>1. Serviços</Text>
             <Field label="Pesquisar serviço" value={serviceSearch} onChangeText={setServiceSearch} placeholder="Digite o nome do serviço" autoCapitalize="none" />
+            <Text style={styles.muted}>Marque um ou mais serviços para este atendimento.</Text>
             <View style={styles.wrap}>
-              {visibleServices.length ? visibleServices.map((service) => <ChoiceChip key={service.id} label={`${service.name} · ${formatBRL(service.price_cents)}`} selected={service.id === serviceId} disabled={submitting} onPress={() => { invalidateSelection(); setServiceId(service.id); }} />) : <Text style={styles.muted}>{catalog.services.length ? "Nenhum serviço encontrado para a busca." : "Nenhum serviço disponível."}</Text>}
+              {visibleServices.length ? visibleServices.map((service) => {
+                const selected = serviceIds.includes(service.id);
+                return <ChoiceChip key={service.id} label={`${selected ? "✓ " : ""}${service.name} · ${formatBRL(service.price_cents)}`} selected={selected} disabled={submitting} onPress={() => {
+                  invalidateSelection();
+                  const next = selected ? serviceIds.filter((id) => id !== service.id) : [...serviceIds, service.id];
+                  setServiceIds(next);
+                  setServiceId(next[0] ?? null);
+                }} />;
+              }) : <Text style={styles.muted}>{catalog.services.length ? "Nenhum serviço encontrado para a busca." : "Nenhum serviço disponível."}</Text>}
             </View>
-            {serviceId ? <Text style={styles.muted}>{catalog.services.find((item) => item.id === serviceId)?.duration_minutes ?? "—"} minutos de duração</Text> : null}
+            {serviceIds.length ? <Text style={styles.muted}>{serviceIds.reduce((total, id) => total + (catalog.services.find((item) => item.id === id)?.duration_minutes ?? 0), 0)} minutos · {formatBRL(serviceIds.reduce((total, id) => total + (catalog.services.find((item) => item.id === id)?.price_cents ?? 0), 0))}</Text> : <Text style={styles.muted}>Selecione ao menos um serviço.</Text>}
           </Card>
           {user.role === "barber" ? (
             <Card><Text style={styles.sectionTitle}>2. Barbeiro</Text><Text style={styles.muted}>Este atendimento será criado para você: {user.name}.</Text></Card>
