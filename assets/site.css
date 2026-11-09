@@ -276,6 +276,13 @@ img { display: block; max-width: 100%; }
     .auth-brand p { font-size: 14px; }
     .auth-card { padding: 29px 23px 31px; }
     .auth-card h2 { font-size: 24px; }
+    .auth-card .password-control { grid-template-columns: 1fr; gap: 9px; }
+    .auth-card .password-control .button { width: 100%; min-height: 42px; }
+    .auth-card .app-downloads { margin-top: 22px; }
+    .auth-card .download-actions { display: grid; gap: 9px; }
+    .auth-card .download-actions .button { min-height: 46px; padding-inline: 10px; text-align: center; }
+    .auth-card .iphone-guide { margin-top: 14px; }
+    .auth-card .iphone-guide ol { padding-left: 20px; }
     .form-grid, .form-grid.three { grid-template-columns: 1fr; }
     .form-grid .span-full { grid-column: auto; }
     .split-layout { grid-template-columns: 1fr; }
