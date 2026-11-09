@@ -1378,7 +1378,7 @@ function handleSummary(PDO $pdo, string $prefix, array $user): never
         }
         $appointmentCount = $pdo->prepare("SELECT COUNT(*) FROM `{$prefix}appointments` WHERE barbershop_id = ? AND starts_at >= ? AND starts_at < ?");
         $appointmentCount->execute([$tenantId, $todayStart, $tomorrowStart]);
-        $appointmentList = $pdo->prepare("SELECT a.id, a.starts_at, a.ends_at, a.status, a.price_cents,
+        $appointmentList = $pdo->prepare("SELECT a.id, a.starts_at, a.ends_at, a.status, s.price_cents,
             c.name AS client_name, b.name AS barber_name, s.name AS service_name
             FROM `{$prefix}appointments` a
             LEFT JOIN `{$prefix}users` c ON c.id = a.client_id
