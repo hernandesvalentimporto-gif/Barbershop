@@ -226,6 +226,12 @@ export const api = {
   userDelete(userId: number) {
     return request<{ deleted_user_id: number }>("user_delete", { method: "POST", body: { id: userId } });
   },
+  masterDashboard() {
+    return request<import("./types").MasterDashboardResponse>("master_dashboard");
+  },
+  masterBilling(barbershopId: number, status: "paid" | "pending") {
+    return request<{ barbershop_id: number; status: string }>("master_billing", { method: "POST", body: { barbershop_id: barbershopId, status } });
+  },
   services() {
     return request<ServiceListResponse>("services");
   },

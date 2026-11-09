@@ -95,3 +95,8 @@ export type SaveServiceInput = {
   active: 0 | 1;
   description?: string;
 };
+
+export type MasterShop = {
+  id: number; name: string; monthly_amount_cents: number; payment_status: "paid" | "pending"; due_date: string; paid_at?: string | null; clients_count: number; barbers_count: number;
+};
+export type MasterDashboardResponse = { shops: MasterShop[]; plan_monthly_cents: number; totals: { shops: number; paid: number; pending: number } };

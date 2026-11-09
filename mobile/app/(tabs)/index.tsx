@@ -1,6 +1,7 @@
 import Feather from "@expo/vector-icons/Feather";
 import React, { useEffect, useState } from "react";
 import { Linking, Pressable, Text, View } from "react-native";
+import { useRouter } from "expo-router";
 
 import { api } from "@/lib/barber/api";
 import { useBarber } from "@/lib/barber/context";
@@ -115,6 +116,8 @@ function UpcomingCard({ appointment }: { appointment: Appointment }) {
 
 function HomeScreen() {
   const { user } = useBarber();
+  const router = useRouter();
+  const isPlatformAdmin = Boolean(user?.platform_admin && !user?.barbershop_id);
   const [summary, setSummary] = useState<SummaryResponse["data"] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -133,9 +136,13 @@ function HomeScreen() {
   }
 
   useEffect(() => {
+    if (isPlatformAdmin) {
+      setLoading(false);
+      return;
+    }
     const timer = setTimeout(() => void load(), 0);
     return () => clearTimeout(timer);
-  }, [user?.id]);
+  }, [user?.id, isPlatformAdmin]);
 
   if (!user) return null;
   const greeting = user.name ? `Olá, ${user.name.split(" ")[0]}` : "Olá";
@@ -149,6 +156,7 @@ function HomeScreen() {
   return (
     <Screen>
       <Header title={greeting} subtitle={isClient ? "Pronto para cuidar do visual?" : isBarber ? "Aqui está sua agenda de hoje." : "Visão geral da operação."} />
+      {isPlatformAdmin ? <Card><Text style={styles.sectionTitle}>Painel Master</Text><Text style={styles.muted}>Gerencie as barbearias clientes, o plano de R$ 30 por mês e os pagamentos pendentes.</Text><Button icon="briefcase" onPress={() => router.push("/master")}>Abrir painel Master</Button></Card> : null}
       {loading ? <LoadingState label="Carregando seu resumo..." /> : null}
       {!loading && error ? <ErrorState message={error} onRetry={() => void load()} /> : null}
       {!loading && !error && isClient ? (
