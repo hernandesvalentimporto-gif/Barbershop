@@ -100,16 +100,22 @@ function LoginScreen() {
   );
 }
 
-function UpcomingCard({ appointment }: { appointment: Appointment }) {
+function UpcomingCard({ appointment, onOpenAgenda, onNewBooking }: { appointment: Appointment | null; onOpenAgenda: () => void; onNewBooking?: () => void }) {
   return (
     <Card>
       <View style={styles.row}>
-        <Text style={styles.sectionTitle}>Próximo atendimento</Text>
-        <StatusBadge status={appointment.status} />
+        <Text style={styles.sectionTitle}>{appointment ? "Próximo atendimento" : "Minha agenda"}</Text>
+        {appointment ? <StatusBadge status={appointment.status} /> : null}
       </View>
-      <Text style={styles.body}>{formatDateTime(appointment.starts_at)}</Text>
-      {appointment.service_name ? <Text style={styles.muted}>{appointment.service_name}</Text> : null}
-      {appointment.barber_name ? <Text style={styles.muted}>Com {appointment.barber_name}</Text> : null}
+      {appointment ? <>
+        <Text style={styles.body}>{formatDateTime(appointment.starts_at)}</Text>
+        {appointment.service_name ? <Text style={styles.muted}>{appointment.service_name}</Text> : null}
+        {appointment.barber_name ? <Text style={styles.muted}>Com {appointment.barber_name}</Text> : null}
+      </> : <Text style={styles.muted}>Você ainda não tem atendimento agendado.</Text>}
+      <View style={{ gap: 10, marginTop: 14 }}>
+        {onNewBooking ? <Button icon="plus" onPress={onNewBooking}>Novo agendamento</Button> : null}
+        <Button variant="secondary" icon="calendar" onPress={onOpenAgenda}>Abrir agenda completa</Button>
+      </View>
     </Card>
   );
 }
@@ -159,9 +165,7 @@ function HomeScreen() {
       {isPlatformAdmin ? <Card><Text style={styles.sectionTitle}>Painel Master</Text><Text style={styles.muted}>Gerencie as barbearias clientes, o plano de R$ 30 por mês e os pagamentos pendentes.</Text><Button icon="briefcase" onPress={() => router.push("/master")}>Abrir painel Master</Button></Card> : null}
       {loading ? <LoadingState label="Carregando seu resumo..." /> : null}
       {!loading && error ? <ErrorState message={error} onRetry={() => void load()} /> : null}
-      {!loading && !error && isClient ? (
-        clientUpcoming ? <UpcomingCard appointment={clientUpcoming} /> : <Card><Text style={styles.sectionTitle}>Nenhum próximo atendimento</Text><Text style={styles.muted}>Quando você tiver um agendamento, ele aparecerá aqui.</Text></Card>
-      ) : null}
+      {!loading && !error && isClient ? <UpcomingCard appointment={clientUpcoming} onOpenAgenda={() => router.push("/agenda")} onNewBooking={() => router.push("/booking")} /> : null}
       {!loading && !error && isBarber ? (
         <Card>
           <Text style={styles.sectionTitle}>Atendimentos de hoje</Text>
@@ -169,6 +173,10 @@ function HomeScreen() {
           {Array.isArray(barberAppointments) ? (
             barberAppointments.length ? barberAppointments.slice(0, 5).map((appointment: Appointment) => <View key={appointment.id} style={styles.row}><View style={{ flex: 1, gap: 3 }}><Text style={styles.body}>{appointment.client_name ?? "Cliente"}</Text><Text style={styles.muted}>{formatDateTime(appointment.starts_at)}{appointment.service_name ? ` · ${appointment.service_name}` : ""}</Text></View><StatusBadge status={appointment.status} /></View>) : <Text style={styles.muted}>Nenhum atendimento informado para hoje.</Text>
           ) : <Text style={styles.muted}>O servidor não retornou a agenda de hoje.</Text>}
+          <View style={{ gap: 10, marginTop: 14 }}>
+            <Button icon="calendar" onPress={() => router.push("/agenda")}>Abrir agenda completa</Button>
+            <Button variant="secondary" icon="plus" onPress={() => router.push("/booking")}>Novo agendamento</Button>
+          </View>
         </Card>
       ) : null}
       {!loading && !error && user.role === "admin" ? (
