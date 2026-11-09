@@ -274,10 +274,10 @@ export default function BookingScreen() {
             <DateStrip dates={dates} selected={date} onSelect={(value) => { if (!submitting) { invalidateSelection(); setDate(value); } }} />
           </Card>
           <Card>
-            <Text style={styles.sectionTitle}>{user.role !== "client" ? "5. Horário disponível" : "4. Horário disponível"}</Text>
+            <Text style={styles.sectionTitle}>{user.role !== "client" ? "5. Horário disponível" : "4. Horários livres"}</Text>
             {slotsLoading ? <LoadingState label="Buscando horários..." /> : null}
             {!slotsLoading && slotsError ? <ErrorState message={slotsError} onRetry={retryAvailability} /> : null}
-            {!slotsLoading && !slotsError && !slots.length && user.role === "client" ? <Text style={styles.muted}>Nenhum horário disponível para esta combinação.</Text> : null}
+            {!slotsLoading && !slotsError && !slots.length && user.role === "client" ? <Notice tone="danger">Não há horários livres para esta data. Os demais horários estão fechados ou já foram ocupados.</Notice> : null}
             {!slotsLoading && slots.length ? <View style={styles.wrap}>{slots.map((slot) => <ChoiceChip key={`${slot.starts_at}-${slot.ends_at}`} label={formatTime(slot.starts_at)} selected={selectedSlot?.starts_at === slot.starts_at} disabled={submitting} onPress={() => { setSelectedSlot(slot); setSelectedSlotKey(selectionKeyRef.current); setManualTime(formatTime(slot.starts_at)); setSubmitError(null); }} />)}</View> : null}
             {user.role !== "client" ? (
               <View style={{ marginTop: 14 }}>
