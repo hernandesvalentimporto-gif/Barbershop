@@ -538,11 +538,21 @@
             }
         });
         const downloads = el('div', { className: 'app-downloads' }, [
-            el('strong', { text: 'Baixe o aplicativo para o cliente' }),
-            el('p', { text: 'Use o mesmo acesso de WhatsApp e senha no celular.' }),
+            el('strong', { text: 'Acesse o aplicativo no celular' }),
+            el('p', { text: 'Use o mesmo WhatsApp/telefone e senha. No iPhone, não precisa baixar arquivo.' }),
             el('div', { className: 'download-actions' }, [
-                el('a', { className: 'button block', href: 'https://github.com/hernandesvalentimporto-gif/Barbershop/releases/latest/download/BarberShop-SistemasHP-Teste-v2.apk', target: '_blank', rel: 'noopener', text: 'Android (APK)' }),
-                el('button', { className: 'button secondary block', type: 'button', disabled: true, text: 'iPhone (em breve)' })
+                el('a', { className: 'button block', href: 'https://github.com/hernandesvalentimporto-gif/Barbershop/releases/latest/download/Barbershop-SistemasHP.apk', target: '_blank', rel: 'noopener', text: 'Android — baixar aplicativo' }),
+                el('a', { className: 'button secondary block', href: '#iphone-install', text: 'iPhone — colocar na tela inicial' })
+            ]),
+            el('div', { id: 'iphone-install', className: 'iphone-guide' }, [
+                el('strong', { text: 'Como colocar no iPhone' }),
+                el('ol', {}, [
+                    el('li', { text: 'Abra este site pelo navegador Safari.' }),
+                    el('li', { text: 'Toque no botão Compartilhar (quadrado com uma seta para cima).' }),
+                    el('li', { text: 'Deslize a lista e toque em “Adicionar à Tela de Início”.' }),
+                    el('li', { text: 'Toque em “Adicionar”. Pronto: o ícone ficará junto dos outros aplicativos.' })
+                ]),
+                el('p', { className: 'guide-note', text: 'Se não aparecer “Adicionar à Tela de Início”, confirme que o site está aberto no Safari, e não dentro do WhatsApp.' })
             ])
         ]);
         card.append(form, downloads, el('div', { className: 'auth-links' }, [authLink('Esqueci minha senha', 'forgot')]));

@@ -16,6 +16,10 @@ $view = in_array($requestedView, $allowedViews, true) ? $requestedView : 'login'
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#090a0c">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Barber Shop">
+    <link rel="manifest" href="manifest.webmanifest">
     <meta name="description" content="Gestão de agenda do Barber Shop Sistemas HP">
     <meta name="robots" content="noindex, nofollow">
     <meta name="referrer" content="no-referrer">
@@ -37,5 +41,10 @@ $view = in_array($requestedView, $allowedViews, true) ? $requestedView : 'login'
         window.BARBERSHOP_BOOTSTRAP = { view: <?= json_encode($view, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?> };
     </script>
     <script src="assets/site.js?v=<?= htmlspecialchars($assetVersion, ENT_QUOTES, 'UTF-8') ?>" defer></script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+        }
+    </script>
 </body>
 </html>
