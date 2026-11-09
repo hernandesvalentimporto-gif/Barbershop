@@ -93,6 +93,22 @@ function apiEnsureApplicationSchema(PDO $pdo, string $prefix): void
         $repair = $pdo->prepare("UPDATE {$usersTable} SET barbershop_id = ? WHERE barbershop_id IS NULL AND platform_admin = 0");
         $repair->execute([(int)$shops[0]]);
     }
+    // Create and seed the platform billing table once during schema bootstrap,
+    // never inside every authenticated request.
+    $billingTable = '`' . str_replace('`', '', $prefix . 'barbershop_billing') . '`';
+    $shopsTable = '`' . str_replace('`', '', $prefix . 'barbershops') . '`';
+    $safePrefix = preg_replace('/[^A-Za-z0-9_]/', '', $prefix);
+    $pdo->exec("CREATE TABLE IF NOT EXISTS {$billingTable} (
+        barbershop_id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+        monthly_amount_cents INT UNSIGNED NOT NULL DEFAULT 3000,
+        status ENUM('paid','pending') NOT NULL DEFAULT 'pending',
+        due_date DATE NOT NULL,
+        paid_at DATETIME NULL,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        KEY idx_{$safePrefix}billing_status (status),
+        CONSTRAINT fk_{$safePrefix}billing_shop FOREIGN KEY (barbershop_id) REFERENCES {$shopsTable}(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    $pdo->exec("INSERT IGNORE INTO {$billingTable} (barbershop_id, due_date) SELECT id, CURRENT_DATE FROM {$shopsTable}");
 }
 
 function apiIntegerValue(mixed $value): ?int
@@ -511,19 +527,6 @@ function authenticatedUser(PDO $pdo, string $prefix): array
     $user['barbershop_id'] = $user['barbershop_id'] === null ? null : (int)$user['barbershop_id'];
     // Legacy installations may have active non-platform users without a tenant.
     // Repair only the unambiguous legacy case: use the lowest existing shop id.
-    $billingTable = '`' . str_replace('`', '', $prefix . 'barbershop_billing') . '`';
-    $shopsTable = '`' . str_replace('`', '', $prefix . 'barbershops') . '`';
-    $pdo->exec("CREATE TABLE IF NOT EXISTS {$billingTable} (
-        barbershop_id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
-        monthly_amount_cents INT UNSIGNED NOT NULL DEFAULT 3000,
-        status ENUM('paid','pending') NOT NULL DEFAULT 'pending',
-        due_date DATE NOT NULL,
-        paid_at DATETIME NULL,
-        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        KEY idx_{$prefix}billing_status (status),
-        CONSTRAINT fk_{$prefix}billing_shop FOREIGN KEY (barbershop_id) REFERENCES {$shopsTable}(id) ON DELETE CASCADE
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-    $pdo->exec("INSERT IGNORE INTO {$billingTable} (barbershop_id, due_date) SELECT id, CURRENT_DATE FROM {$shopsTable}");
     if ($user['barbershop_id'] === null && (int)($user['platform_admin'] ?? 0) === 0) {
         $shopId = $pdo->query("SELECT MIN(id) FROM `" . str_replace('`', '', $prefix . 'barbershops') . "`")->fetchColumn();
         if ($shopId !== false && $shopId !== null) {
