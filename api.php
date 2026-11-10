@@ -964,7 +964,30 @@ function apiProspectFallbackName(string $title): string
     $name = preg_replace('/\s+[|–—-]\s+.*$/u', '', trim($title)) ?? trim($title);
     return apiProspectText($name, 200);
 }
-
+function apiProspectLeadResponse(array $lead): array
+{
+    $labels = [
+        'new' => 'NOVO',
+        'contacted' => 'CONTATADO',
+        'interested' => 'INTERESSADO',
+        'customer' => 'CLIENTE',
+        'declined' => 'RECUSOU',
+    ];
+    $status = (string)($lead['status'] ?? 'new');
+    return [
+        'id' => (int)($lead['id'] ?? 0),
+        'name' => (string)($lead['name'] ?? ''),
+        'phone' => $lead['phone'] === null ? null : (string)$lead['phone'],
+        'email' => $lead['email'] === null ? null : (string)$lead['email'],
+        'website' => $lead['website'] === null ? null : (string)$lead['website'],
+        'address' => $lead['address'] === null ? null : (string)$lead['address'],
+        'city' => $lead['city'] === null ? null : (string)$lead['city'],
+        'state' => $lead['state'] === null ? null : (string)$lead['state'],
+        'source_url' => $lead['source_url'] === null ? null : (string)$lead['source_url'],
+        'status' => $status,
+        'status_label' => $labels[$status] ?? strtoupper($status),
+    ];
+}
 function apiProspectFetchLeads(PDO $pdo, string $prefix, array $filters): array
 {
     $sql = "SELECT id,name,phone,email,website,address,city,state,source_url,status FROM `{$prefix}prospect_leads` WHERE 1=1";
