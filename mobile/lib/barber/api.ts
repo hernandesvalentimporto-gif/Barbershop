@@ -1,6 +1,6 @@
 import type {
   AppointmentListResponse,
-  AvailabilitySlot,
+  AvailabilityResponse,
   BarberUser,
   Catalog,
   ClientHistoryAppointment,
@@ -188,7 +188,7 @@ export const api = {
     return request<Catalog>("catalog");
   },
   availability(date: string, barberId: number, serviceIds: number[]) {
-    return request<{ slots: AvailabilitySlot[] }>("availability", {
+    return request<AvailabilityResponse>("availability", {
       query: { date, barber_id: barberId, service_ids: serviceIds.join(",") },
     });
   },

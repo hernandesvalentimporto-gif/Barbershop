@@ -69,14 +69,14 @@ jobs:
       - name: Conferir assinatura e guardar candidato
         run: |
           mkdir -p ../build-artifacts
-          cp android/app/build/outputs/apk/release/app-release.apk ../build-artifacts/BarberShop-SistemasHP-Teste-v2.apk
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs ../build-artifacts/BarberShop-SistemasHP-Teste-v2.apk
-          (cd ../build-artifacts && sha256sum BarberShop-SistemasHP-Teste-v2.apk > SHA256SUMS.txt)
-          printf '%s\n' 'APK de teste 1.0.2, com identidade Barber Shop Sistemas HP reforçada no acesso e nas telas principais. ARM64 e x86_64, assinatura de desenvolvimento Expo. Sem publicação em lojas. Administração completa depende da implantação aprovada do complemento PHP. O teste de abertura em emulador não substitui a validação completa no celular.' > ../build-artifacts/LEIA-ME.txt
+          cp android/app/build/outputs/apk/release/app-release.apk ../build-artifacts/BarberShop-SistemasHP-Teste-v3.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs ../build-artifacts/BarberShop-SistemasHP-Teste-v3.apk
+          (cd ../build-artifacts && sha256sum BarberShop-SistemasHP-Teste-v3.apk > SHA256SUMS.txt)
+          printf '%s\n' 'APK de teste 1.0.3, com buscas compactas de clientes, serviços e barbeiros e horários ocupados desabilitados. ARM64 e x86_64, assinatura de desenvolvimento Expo. Sem publicação em lojas; o teste de abertura em emulador não substitui a validação completa no celular.' > ../build-artifacts/LEIA-ME.txt
       - name: Transferir candidato para a máquina de testes
         uses: actions/upload-artifact@v4
         with:
-          name: BarberShop-SistemasHP-Candidato-v2
+          name: BarberShop-SistemasHP-Candidato-v3
           path: build-artifacts/
           if-no-files-found: error
           retention-days: 7
@@ -105,7 +105,7 @@ jobs:
       - name: Baixar o APK candidato
         uses: actions/download-artifact@v4
         with:
-          name: BarberShop-SistemasHP-Candidato-v2
+          name: BarberShop-SistemasHP-Candidato-v3
           path: build-artifacts
       - name: Liberar disco dos toolchains que este teste não utiliza
         run: |
@@ -128,11 +128,11 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
           working-directory: mobile
-          script: bash scripts/android-startup-smoke.sh ../build-artifacts/BarberShop-SistemasHP-Teste-v2.apk
+          script: bash scripts/android-startup-smoke.sh ../build-artifacts/BarberShop-SistemasHP-Teste-v3.apk
       - name: Disponibilizar APK após o teste de abertura
         uses: actions/upload-artifact@v4
         with:
-          name: BarberShop-SistemasHP-APK-Teste
+          name: BarberShop-SistemasHP-APK-Teste-v3
           path: build-artifacts/
           if-no-files-found: error
           retention-days: 30

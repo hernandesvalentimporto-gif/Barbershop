@@ -27,12 +27,17 @@ export type Service = {
 
 export type Catalog = {
   services: Service[];
-  barbers: Array<{ id: number; name: string }>;
+  barbers: { id: number; name: string }[];
 };
 
 export type AvailabilitySlot = {
   starts_at: string;
   ends_at: string;
+};
+
+export type AvailabilityResponse = {
+  slots: AvailabilitySlot[];
+  busy_slots?: AvailabilitySlot[];
 };
 
 export type Appointment = {
