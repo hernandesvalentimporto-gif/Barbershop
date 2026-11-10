@@ -1065,7 +1065,14 @@ function handleMasterProspectSearch(PDO $pdo, string $prefix, array $user): neve
         $evidenceId = (string)($business['evidence_id'] ?? ''); $doc = $docs[$evidenceId] ?? null; if (!is_array($doc)) continue;
         $evidenceText = $doc['title'] . "\n" . $doc['text']; $name = apiProspectText($business['company_name'] ?? $business['name'] ?? '', 200); if ($name === '' || !apiProspectEvidenceContains($evidenceText, $name)) continue;
         $email = strtolower(apiProspectText($business['email'] ?? '', 190)); if ($email !== '' && (!filter_var($email, FILTER_VALIDATE_EMAIL) || !apiProspectEvidenceContains($evidenceText, $email))) $email = '';
+        if ($email === '' && preg_match('/[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}/iu', $evidenceText, $emailMatch)) {
+            $candidateEmail = strtolower((string)$emailMatch[0]);
+            if (filter_var($candidateEmail, FILTER_VALIDATE_EMAIL)) $email = $candidateEmail;
+        }
         $phone = apiProspectText($business['phone'] ?? '', 40); $digits = preg_replace('/\D+/', '', $phone) ?? ''; $evidenceDigits = preg_replace('/\D+/', '', $evidenceText) ?? ''; if ($phone !== '' && (strlen($digits) < 7 || strpos($evidenceDigits, $digits) === false)) $phone = '';
+        if ($phone === '' && preg_match('/(?:\+?55[\s.-]*)?(?:\(?[0-9]{2}\)?[\s.-]*)?9?[0-9]{4}[\s.-]*[0-9]{4}/', $evidenceText, $phoneMatch)) {
+            $phone = apiProspectText($phoneMatch[0], 40);
+        }
         $website = apiProspectText(apiProspectSafeUrl($business['website'] ?? '') ?: $doc['url'], 500); $sourceUrl = apiProspectText($doc['url'], 700); $address = apiProspectText($business['address'] ?? '', 500); $city = apiProspectText($business['city'] ?? '', 120); $state = strtoupper(apiProspectText($business['state'] ?? $filters['state'], 80)); $fingerprint = hash('sha256', strtolower(trim($name . '|' . $city . '|' . $state . '|' . $website)));
         $insert->execute([$fingerprint, $name, $phone ?: null, $email ?: null, $website ?: null, $address ?: null, $city ?: null, $state ?: null, $sourceUrl]); $count++;
     }

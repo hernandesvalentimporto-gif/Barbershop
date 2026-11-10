@@ -733,7 +733,7 @@
             if (!leads.length) { list.append(emptyState('Nenhuma barbearia encontrada', 'Tente Brasil inteiro ou outro estado.')); return; }
             leads.forEach((lead) => {
                 const actions = []; const phone = String(lead.phone || '').replace(/\D/g, '');
-                if (phone) actions.push(button('WhatsApp', 'button secondary small', () => openContact(`https://wa.me/${phone}`)));
+                if (phone) actions.push(button('WhatsApp', 'button secondary small', () => { const waPhone = phone.startsWith('55') ? phone : `55${phone}`; const text = `Olá, tudo bem? Meu nome é Hernandes, da Sistemas HP. Vi a ${lead.name} e gostaria de apresentar nossa agenda online para barbearias, barber shops, barbeiros e salões. Posso explicar como funciona?`; openContact(`https://wa.me/${waPhone}?text=${encodeURIComponent(text)}`); }));
                 if (lead.website) actions.push(button('Site', 'button secondary small', () => openContact(/^https?:\/\//i.test(lead.website) ? lead.website : `https://${lead.website}`)));
                 if (lead.email) actions.push(button('E-mail', 'button secondary small', () => { window.location.href = `mailto:${lead.email}`; }));
                 list.append(el('article', { className: 'record-row' }, [el('div', { className: 'record-main' }, [el('strong', { text: lead.name }), el('span', { text: lead.address || [lead.city, lead.state].filter(Boolean).join(' / ') || 'Endereço não informado' }), lead.phone ? el('span', { text: `Telefone: ${lead.phone}` }) : null, lead.email ? el('span', { text: `E-mail: ${lead.email}` }) : null]), el('div', { className: 'record-secondary' }, [el('span', { className: 'status', text: lead.status_label || 'NOVO' }), el('div', { className: 'form-actions' }, actions)])]));
