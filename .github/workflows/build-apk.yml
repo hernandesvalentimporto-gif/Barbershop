@@ -72,7 +72,7 @@ jobs:
           cp android/app/build/outputs/apk/release/app-release.apk ../build-artifacts/BarberShop-SistemasHP-Teste-v2.apk
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs ../build-artifacts/BarberShop-SistemasHP-Teste-v2.apk
           (cd ../build-artifacts && sha256sum BarberShop-SistemasHP-Teste-v2.apk > SHA256SUMS.txt)
-          printf '%s\n' 'APK de teste 1.0.1, com correção da navegação de entrada. ARM64 e x86_64, assinatura de desenvolvimento Expo. Sem publicação em lojas. Administração completa depende da implantação aprovada do complemento PHP. O teste de abertura em emulador não substitui a validação completa no celular.' > ../build-artifacts/LEIA-ME.txt
+          printf '%s\n' 'APK de teste 1.0.2, com identidade Barber Shop Sistemas HP reforçada no acesso e nas telas principais. ARM64 e x86_64, assinatura de desenvolvimento Expo. Sem publicação em lojas. Administração completa depende da implantação aprovada do complemento PHP. O teste de abertura em emulador não substitui a validação completa no celular.' > ../build-artifacts/LEIA-ME.txt
       - name: Transferir candidato para a máquina de testes
         uses: actions/upload-artifact@v4
         with:

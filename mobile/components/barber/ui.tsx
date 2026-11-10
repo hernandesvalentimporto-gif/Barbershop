@@ -83,6 +83,7 @@ export function BrandHeader({ subtitle, compact = false }: { subtitle?: string; 
 export function Header({ title, subtitle, right }: { title: string; subtitle?: string; right?: React.ReactNode }) {
   return (
     <View style={styles.header}>
+      <Image source={require("@/assets/images/barber-logo.png")} style={styles.headerLogo} resizeMode="contain" accessibilityLabel="Logo Barber Shop Sistemas HP" />
       <View style={styles.headerCopy}>
         <Text style={styles.eyebrow}>SISTEMAS HP</Text>
         <Text style={styles.title}>{title}</Text>
@@ -248,13 +249,14 @@ export const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: BARBER_COLORS.background },
   flex: { flex: 1 },
   scrollContent: { padding: 17, paddingBottom: 100, gap: 16 },
-  brandHeader: { alignItems: "center", gap: 9, paddingTop: 12, paddingBottom: 24 },
+  brandHeader: { alignItems: "center", gap: 9, paddingTop: 10, paddingBottom: 20 },
   brandHeaderCompact: { paddingTop: 0, paddingBottom: 8 },
-  logo: { width: 170, height: 120 },
+  logo: { width: 250, height: 232 },
   logoSmall: { width: 95, height: 68 },
   brandSubtitle: { color: BARBER_COLORS.textMuted, fontSize: 13, letterSpacing: 1.2, textTransform: "uppercase" },
-  header: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12 },
-  headerCopy: { flex: 1, gap: 4 },
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 9 },
+  headerLogo: { width: 62, height: 58, flexShrink: 0 },
+  headerCopy: { flex: 1, minWidth: 0, gap: 4 },
   eyebrow: { color: BARBER_COLORS.gold, fontSize: 11, fontWeight: "800", letterSpacing: 2.4 },
   title: { color: BARBER_COLORS.text, fontSize: 27, fontWeight: "800", letterSpacing: -0.9 },
   subtitle: { color: BARBER_COLORS.textMuted, fontSize: 14, lineHeight: 20 },
