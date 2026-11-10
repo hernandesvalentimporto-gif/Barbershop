@@ -577,8 +577,15 @@
                     message.className = 'form-message error';
                     message.textContent = 'A recuperação por e-mail está temporariamente indisponível. Avise o administrador da plataforma.';
                 } else {
-                    message.className = 'form-message success';
-                    message.textContent = result.message || 'Se houver uma conta, as instruções foram enviadas.';
+                    form.hidden = true;
+                    const confirmation = el('div', { className: 'card section-card recovery-confirmation' }, [
+                        el('div', { className: 'success-icon', text: '✓', 'aria-hidden': 'true' }),
+                        el('h2', { text: 'Verifique seu e-mail' }),
+                        el('p', { className: 'subheading', text: 'Se este e-mail estiver cadastrado, enviamos um link para redefinir sua senha.' }),
+                        el('p', { className: 'field-hint', text: 'Confira também a pasta de spam ou lixo eletrônico. O link tem validade limitada.' }),
+                        el('div', { className: 'form-actions' }, [button('Voltar para entrar', 'button secondary block', () => navigate('login'))])
+                    ]);
+                    card.insertBefore(confirmation, form.nextSibling);
                 }
             } catch (error) {
                 message.className = 'form-message error';

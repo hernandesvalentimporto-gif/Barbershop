@@ -487,7 +487,12 @@ function webSmtpSend(string $recipient, string $subject, string $body): bool
     $domain = parse_url(webTrustedBaseUrl() ?: 'https://localhost', PHP_URL_HOST) ?: 'localhost';
     if (!$send('EHLO ' . $domain)) { fclose($socket); return false; }
     if ($secure === 'tls') { if (!$send('STARTTLS') || !@stream_socket_enable_crypto($socket, true, STREAM_CRYPTO_METHOD_TLS_CLIENT) || !$send('EHLO ' . $domain)) { fclose($socket); return false; } }
-    if (!$send('AUTH LOGIN') || !$send(base64_encode($user)) || !$send(base64_encode($pass))) { fclose($socket); return false; }
+    fwrite($socket, 'AUTH LOGIN\r\n');
+    if (preg_match('/^334/m', $read()) !== 1) { fclose($socket); return false; }
+    fwrite($socket, base64_encode($user) . "\r\n");
+    if (preg_match('/^334/m', $read()) !== 1) { fclose($socket); return false; }
+    fwrite($socket, base64_encode($pass) . "\r\n");
+    if (preg_match('/^235/m', $read()) !== 1) { fclose($socket); return false; }
     $from = webMailFrom(); if ($from === null || !$send('MAIL FROM:<' . $from . '>') || !$send('RCPT TO:<' . $recipient . '>') || !$send('DATA')) { fclose($socket); return false; }
     $safeSubject = '=?UTF-8?B?' . base64_encode($subject) . '?=';
     $headers = 'From: ' . $from . "\r\n" . 'To: ' . $recipient . "\r\n" . 'Subject: ' . $safeSubject . "\r\n" . 'Content-Type: text/plain; charset=UTF-8\r\n' . 'Content-Transfer-Encoding: 8bit\r\n';
