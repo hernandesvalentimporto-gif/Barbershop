@@ -979,7 +979,7 @@ function handleMasterProspectSearch(PDO $pdo, string $prefix, array $user): neve
     $tavily = trim((string)($config['tavily_api_key'] ?? ''));
     $openrouter = trim((string)($config['openrouter_api_key'] ?? ''));
     if ($tavily === '' || $openrouter === '') apiError('prospecting_not_configured', 503);
-    $parts = array_filter([$filters['term'] ?: 'barbearias barber shops barbeiros salões', $filters['city'], $filters['state'], 'Brasil']);
+    $parts = array_filter([$filters['term'] ?: 'barbearias barber shops barbeiros salões de beleza salão masculino cabeleireiros barbearia masculina', $filters['city'], $filters['state'], 'Brasil']);
     $query = implode(' ', $parts);
     $search = apiProspectHttp('https://api.tavily.com/search', ['Content-Type: application/json', 'Authorization: Bearer ' . $tavily], apiProspectEncode(['query' => $query, 'search_depth' => 'basic', 'max_results' => 20, 'country' => 'brazil', 'language' => 'pt']));
     if ($search['status'] < 200 || $search['status'] >= 300) apiProspectJsonError($search, 'prospecting_search');
