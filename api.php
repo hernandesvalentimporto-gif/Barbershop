@@ -150,6 +150,31 @@ function apiEnsureApplicationSchema(PDO $pdo, string $prefix): void
         CONSTRAINT fk_{$safePrefix}billing_shop FOREIGN KEY (barbershop_id) REFERENCES {$shopsTable}(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
     $pdo->exec("INSERT IGNORE INTO {$billingTable} (barbershop_id, due_date) SELECT id, CURRENT_DATE FROM {$shopsTable}");
+    $prospectLeadsTable = '`' . str_replace('`', '', $prefix . 'prospect_leads') . '`';
+    $prospectRunsTable = '`' . str_replace('`', '', $prefix . 'prospect_search_runs') . '`';
+    $pdo->exec("CREATE TABLE IF NOT EXISTS {$prospectLeadsTable} (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+        fingerprint CHAR(64) NOT NULL,
+        name VARCHAR(200) NOT NULL,
+        phone VARCHAR(40) NULL,
+        email VARCHAR(190) NULL,
+        website VARCHAR(500) NULL,
+        address VARCHAR(500) NULL,
+        city VARCHAR(120) NULL,
+        state VARCHAR(80) NULL,
+        source_url VARCHAR(700) NULL,
+        status ENUM('new','contacted','interested','customer','declined') NOT NULL DEFAULT 'new',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (id), UNIQUE KEY uq_{$safePrefix}prospect_fingerprint (fingerprint),
+        KEY idx_{$safePrefix}prospect_location (state, city), KEY idx_{$safePrefix}prospect_status (status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS {$prospectRunsTable} (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, query_text VARCHAR(500) NOT NULL,
+        state VARCHAR(80) NULL, city VARCHAR(120) NULL, result_count INT UNSIGNED NOT NULL DEFAULT 0,
+        status ENUM('completed','failed') NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (id), KEY idx_{$safePrefix}prospect_runs_created (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
     $appointmentsTable = '`' . str_replace('`', '', $prefix . 'appointments') . '`';
     $servicesTable = '`' . str_replace('`', '', $prefix . 'services') . '`';
     $appointmentServicesTable = '`' . str_replace('`', '', $prefix . 'appointment_services') . '`';
@@ -857,6 +882,111 @@ function requirePlatformAdmin(array $user): void
     }
 }
 
+function apiRequirePlatformAdmin(array $user): void
+{
+    if ((int)($user['platform_admin'] ?? 0) !== 1 || ($user['barbershop_id'] ?? null) !== null) {
+        apiError('forbidden', 403);
+    }
+}
+
+function apiProspectConfig(): array
+{
+    $path = __DIR__ . '/prospeccao/config.local.php';
+    if (!is_file($path)) return [];
+    try { $value = require $path; } catch (Throwable) { return []; }
+    return is_array($value) ? $value : [];
+}
+
+function apiProspectText(mixed $value, int $max = 500): string
+{
+    if (!is_string($value)) return '';
+    $value = trim(preg_replace('/\\s+/', ' ', $value) ?? '');
+    return function_exists('mb_substr') ? mb_substr($value, 0, $max, 'UTF-8') : substr($value, 0, $max);
+}
+
+function apiProspectHttp(string $url, array $headers, string $body): array
+{
+    if (!function_exists('curl_init')) return ['status' => 0, 'body' => ''];
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_POSTFIELDS => $body, CURLOPT_HTTPHEADER => $headers, CURLOPT_RETURNTRANSFER => true, CURLOPT_CONNECTTIMEOUT => 10, CURLOPT_TIMEOUT => 35]);
+    $response = curl_exec($ch);
+    $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    return ['status' => $status, 'body' => is_string($response) ? $response : ''];
+}
+
+function apiProspectFilters(array $data): array
+{
+    return [
+        'state' => strtoupper(apiProspectText($data['state'] ?? '', 80)),
+        'city' => apiProspectText($data['city'] ?? '', 120),
+        'term' => apiProspectText($data['term'] ?? 'barbearia', 160),
+    ];
+}
+
+function apiProspectLeadResponse(array $row): array
+{
+    $labels = ['new' => 'NOVO', 'contacted' => 'CONTATADO', 'interested' => 'INTERESSADO', 'customer' => 'CLIENTE', 'declined' => 'NÃO INTERESSADO'];
+    $status = (string)($row['status'] ?? 'new');
+    return ['id' => (int)$row['id'], 'name' => (string)$row['name'], 'phone' => $row['phone'] === null ? null : (string)$row['phone'], 'email' => $row['email'] === null ? null : (string)$row['email'], 'website' => $row['website'] === null ? null : (string)$row['website'], 'address' => $row['address'] === null ? null : (string)$row['address'], 'city' => $row['city'] === null ? null : (string)$row['city'], 'state' => $row['state'] === null ? null : (string)$row['state'], 'source_url' => $row['source_url'] === null ? null : (string)$row['source_url'], 'status' => $status, 'status_label' => $labels[$status] ?? strtoupper($status)];
+}
+
+function apiProspectFetchLeads(PDO $pdo, string $prefix, array $filters): array
+{
+    $sql = "SELECT id,name,phone,email,website,address,city,state,source_url,status FROM `{$prefix}prospect_leads` WHERE 1=1";
+    $params = [];
+    if ($filters['state'] !== '') { $sql .= ' AND state = ?'; $params[] = $filters['state']; }
+    if ($filters['city'] !== '') { $sql .= ' AND city LIKE ?'; $params[] = '%' . $filters['city'] . '%'; }
+    if ($filters['term'] !== '') { $sql .= ' AND name LIKE ?'; $params[] = '%' . $filters['term'] . '%'; }
+    $sql .= ' ORDER BY id DESC LIMIT 100';
+    $stmt = $pdo->prepare($sql); $stmt->execute($params);
+    return array_map('apiProspectLeadResponse', $stmt->fetchAll());
+}
+
+function handleMasterProspectLeads(PDO $pdo, string $prefix, array $user): never
+{
+    apiRequireMethod('GET'); apiRequirePlatformAdmin($user);
+    $filters = apiProspectFilters($_GET);
+    jsonResponse(['ok' => true, 'leads' => apiProspectFetchLeads($pdo, $prefix, $filters)]);
+}
+
+function handleMasterProspectSearch(PDO $pdo, string $prefix, array $user): never
+{
+    apiRequireMethod('POST'); apiRequirePlatformAdmin($user);
+    $filters = apiProspectFilters(apiReadBody());
+    if ($filters['state'] === '' && $filters['city'] === '' && $filters['term'] === '') apiError('invalid_prospect_query', 422);
+    $config = apiProspectConfig();
+    $tavily = trim((string)($config['tavily_api_key'] ?? ''));
+    $openrouter = trim((string)($config['openrouter_api_key'] ?? ''));
+    if ($tavily === '' || $openrouter === '') apiError('prospecting_not_configured', 503);
+    $parts = array_filter([$filters['term'] ?: 'barbearia', $filters['city'], $filters['state'], 'Brasil']);
+    $query = implode(' ', $parts);
+    $search = apiProspectHttp('https://api.tavily.com/search', ['Content-Type: application/json', 'Authorization: Bearer ' . $tavily], json_encode(['query' => $query, 'search_depth' => 'basic', 'max_results' => 10, 'topic' => 'general'], JSON_UNESCAPED_UNICODE));
+    if ($search['status'] < 200 || $search['status'] >= 300) apiError('prospecting_search_failed', 502);
+    $searchData = json_decode($search['body'], true);
+    $results = is_array($searchData['results'] ?? null) ? $searchData['results'] : [];
+    $evidence = [];
+    foreach ($results as $i => $item) { $evidence[] = ['id' => (string)($i + 1), 'title' => apiProspectText($item['title'] ?? '', 220), 'url' => apiProspectText($item['url'] ?? '', 600), 'content' => apiProspectText($item['content'] ?? '', 1200)]; }
+    $prompt = 'Use somente as evidências públicas abaixo. Retorne JSON válido no formato {"businesses":[{"name":"","phone":"","email":"","website":"","address":"","city":"","state":"","source_url":""}]}. Não invente dados. Inclua somente barbearias literalmente sustentadas pelas evidências. Máximo 15. Evidências: ' . json_encode($evidence, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $ai = apiProspectHttp('https://openrouter.ai/api/v1/chat/completions', ['Content-Type: application/json', 'Authorization: Bearer ' . $openrouter, 'HTTP-Referer: https://sistemashp.com.br/barbershop', 'X-Title: Barbershop Prospecção'], json_encode(['model' => (string)($config['openrouter_model'] ?? 'openrouter/free'), 'messages' => [['role' => 'user', 'content' => $prompt]], 'temperature' => 0], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+    if ($ai['status'] < 200 || $ai['status'] >= 300) apiError('prospecting_ai_failed', 502);
+    $aiData = json_decode($ai['body'], true);
+    $content = $aiData['choices'][0]['message']['content'] ?? '';
+    $content = preg_replace('/^```(?:json)?\\s*|\\s*```$/i', '', (string)$content) ?? '';
+    $parsed = json_decode(trim($content), true);
+    $businesses = is_array($parsed['businesses'] ?? null) ? $parsed['businesses'] : [];
+    $insert = $pdo->prepare("INSERT INTO `{$prefix}prospect_leads` (fingerprint,name,phone,email,website,address,city,state,source_url) VALUES (?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE name=VALUES(name),phone=COALESCE(VALUES(phone),phone),email=COALESCE(VALUES(email),email),website=COALESCE(VALUES(website),website),address=COALESCE(VALUES(address),address),updated_at=CURRENT_TIMESTAMP");
+    $count = 0;
+    foreach (array_slice($businesses, 0, 15) as $business) {
+        $name = apiProspectText($business['name'] ?? '', 200); if ($name === '') continue;
+        $phone = apiProspectText($business['phone'] ?? '', 40); $email = apiProspectText($business['email'] ?? '', 190); $website = apiProspectText($business['website'] ?? '', 500); $address = apiProspectText($business['address'] ?? '', 500); $city = apiProspectText($business['city'] ?? '', 120); $state = strtoupper(apiProspectText($business['state'] ?? $filters['state'], 80)); $source = apiProspectText($business['source_url'] ?? '', 700);
+        $fingerprint = hash('sha256', strtolower(trim($name . '|' . $city . '|' . $state . '|' . $website)));
+        $insert->execute([$fingerprint, $name, $phone ?: null, $email ?: null, $website ?: null, $address ?: null, $city ?: null, $state ?: null, $source ?: null]); $count++;
+    }
+    $run = $pdo->prepare("INSERT INTO `{$prefix}prospect_search_runs` (query_text,state,city,result_count,status) VALUES (?,?,?,?, 'completed')"); $run->execute([$query, $filters['state'] ?: null, $filters['city'] ?: null, $count]);
+    jsonResponse(['ok' => true, 'search_id' => (int)$pdo->lastInsertId(), 'leads' => apiProspectFetchLeads($pdo, $prefix, $filters)]);
+}
+
 function handleMasterDashboard(PDO $pdo, string $prefix, array $user): never
 {
     apiRequireMethod('GET');
@@ -1549,6 +1679,12 @@ function runApi(): never
         }
         if ($action === 'master_billing') {
             handleMasterBilling($pdo, $prefix, $user);
+        }
+        if ($action === 'master_prospect_search') {
+            handleMasterProspectSearch($pdo, $prefix, $user);
+        }
+        if ($action === 'master_prospect_leads') {
+            handleMasterProspectLeads($pdo, $prefix, $user);
         }
         if ($action === 'users') {
             handleUsers($pdo, $prefix, $user);

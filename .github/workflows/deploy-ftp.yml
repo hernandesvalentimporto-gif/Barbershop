@@ -20,6 +20,21 @@ jobs:
     steps:
       - name: Baixar o código
         uses: actions/checkout@v4
+      - name: Preparar configuração privada da prospecção
+        env:
+          BARBERSHOP_TAVILY_API_KEY: ${{ secrets.BARBERSHOP_TAVILY_API_KEY }}
+          BARBERSHOP_OPENROUTER_API_KEY: ${{ secrets.BARBERSHOP_OPENROUTER_API_KEY }}
+        run: |
+          if [ -z "$BARBERSHOP_TAVILY_API_KEY" ] || [ -z "$BARBERSHOP_OPENROUTER_API_KEY" ]; then
+            echo "::error::Configure BARBERSHOP_TAVILY_API_KEY e BARBERSHOP_OPENROUTER_API_KEY antes do deploy."
+            exit 1
+          fi
+          mkdir -p prospeccao
+          tavily_b64="$(printf %s "$BARBERSHOP_TAVILY_API_KEY" | base64 -w0)"
+          openrouter_b64="$(printf %s "$BARBERSHOP_OPENROUTER_API_KEY" | base64 -w0)"
+          printf "%s\n"             "<?php"             "return ["             "  'tavily_api_key' => base64_decode('$tavily_b64'),"             "  'openrouter_api_key' => base64_decode('$openrouter_b64'),"             "  'openrouter_model' => 'openrouter/free',"             "];" > prospeccao/config.local.php
+          chmod 600 prospeccao/config.local.php
+
       - name: Publicar na pasta barbershop
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
