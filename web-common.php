@@ -63,7 +63,19 @@ function webConfig(): array
     } catch (Throwable) {
         return $config;
     }
-    return $config = is_array($value) ? $value : [];
+    $config = is_array($value) ? $value : [];
+    $mailPath = __DIR__ . '/mail.local.php';
+    if (is_file($mailPath)) {
+        try {
+            $mailValue = require $mailPath;
+            if (is_array($mailValue)) {
+                $config['mail'] = array_merge(is_array($config['mail'] ?? null) ? $config['mail'] : [], $mailValue);
+            }
+        } catch (Throwable) {
+            // Keep the public configuration usable when the private mail file is unavailable.
+        }
+    }
+    return $config;
 }
 
 function webRequestIsHttps(): bool
@@ -442,14 +454,11 @@ function webMailTestPath(): ?string
 
 function webMailEnabled(): bool
 {
-    if (webMailTestPath() !== null) {
-        return true;
-    }
+    if (webMailTestPath() !== null) return true;
     $config = webConfig();
-    if (($config['mail']['enabled'] ?? true) === false) {
-        return false;
-    }
-    return function_exists('mail') && webMailFrom() !== null;
+    if (($config['mail']['enabled'] ?? true) === false) return false;
+    $mail = is_array($config['mail'] ?? null) ? $config['mail'] : [];
+    return webMailFrom() !== null && (trim((string)($mail['smtp_host'] ?? '')) !== '' || function_exists('mail'));
 }
 
 function webResetLink(string $token): ?string
@@ -459,6 +468,32 @@ function webResetLink(string $token): ?string
         return null;
     }
     return $base . '/index.php?view=reset#token=' . rawurlencode($token);
+}
+
+function webSmtpSend(string $recipient, string $subject, string $body): bool
+{
+    $config = webConfig(); $mail = is_array($config['mail'] ?? null) ? $config['mail'] : [];
+    $host = trim((string)($mail['smtp_host'] ?? '')); $user = trim((string)($mail['smtp_username'] ?? '')); $pass = (string)($mail['smtp_password'] ?? '');
+    $port = (int)($mail['smtp_port'] ?? 465); $secure = strtolower(trim((string)($mail['smtp_secure'] ?? 'ssl')));
+    if ($host === '' || $user === '' || $pass === '' || !in_array($secure, ['ssl', 'tls'], true)) return false;
+    $remote = ($secure === 'ssl' ? 'ssl://' : '') . $host . ':' . $port;
+    $socket = @stream_socket_client($remote, $errno, $errstr, 12, STREAM_CLIENT_CONNECT);
+    if (!is_resource($socket)) return false;
+    stream_set_timeout($socket, 12);
+    $read = static function () use ($socket): string { $out = ''; while (($line = fgets($socket, 515)) !== false) { $out .= $line; if (isset($line[3]) && $line[3] === ' ') break; } return $out; };
+    $send = static function (string $command) use ($socket, $read): bool { fwrite($socket, $command . "\r\n"); $reply = $read(); return preg_match('/^[245][0-9]{2}/m', $reply) === 1; };
+    $greeting = $read();
+    if (!preg_match('/^2[0-9]{2}/m', $greeting)) { fclose($socket); return false; }
+    $domain = parse_url(webTrustedBaseUrl() ?: 'https://localhost', PHP_URL_HOST) ?: 'localhost';
+    if (!$send('EHLO ' . $domain)) { fclose($socket); return false; }
+    if ($secure === 'tls') { if (!$send('STARTTLS') || !@stream_socket_enable_crypto($socket, true, STREAM_CRYPTO_METHOD_TLS_CLIENT) || !$send('EHLO ' . $domain)) { fclose($socket); return false; } }
+    if (!$send('AUTH LOGIN') || !$send(base64_encode($user)) || !$send(base64_encode($pass))) { fclose($socket); return false; }
+    $from = webMailFrom(); if ($from === null || !$send('MAIL FROM:<' . $from . '>') || !$send('RCPT TO:<' . $recipient . '>') || !$send('DATA')) { fclose($socket); return false; }
+    $safeSubject = '=?UTF-8?B?' . base64_encode($subject) . '?=';
+    $headers = 'From: ' . $from . "\r\n" . 'To: ' . $recipient . "\r\n" . 'Subject: ' . $safeSubject . "\r\n" . 'Content-Type: text/plain; charset=UTF-8\r\n' . 'Content-Transfer-Encoding: 8bit\r\n';
+    $payload = preg_replace('/\r?\n/', "\r\n", $headers . "\r\n" . $body) ?? ($headers . "\r\n" . $body);
+    $payload = preg_replace('/^\./m', '..', $payload) ?? $payload;
+    fwrite($socket, $payload . "\r\n.\r\n"); $accepted = preg_match('/^2[0-9]{2}/m', $read()) === 1; $send('QUIT'); fclose($socket); return $accepted;
 }
 
 function webSendResetMail(string $recipient, string $token, string $name): bool
@@ -492,6 +527,10 @@ function webSendResetMail(string $recipient, string $token, string $name): bool
             return false;
         }
         return @file_put_contents($testPath, $record . "\n", FILE_APPEND | LOCK_EX) !== false;
+    }
+    $mail = webConfig()['mail'] ?? [];
+    if (is_array($mail) && trim((string)($mail['smtp_host'] ?? '')) !== '') {
+        return webSmtpSend($recipient, $subject, $body);
     }
     $headers = 'From: ' . $from . "\r\nContent-Type: text/plain; charset=UTF-8\r\n";
     return @mail($recipient, $subject, $body, $headers);

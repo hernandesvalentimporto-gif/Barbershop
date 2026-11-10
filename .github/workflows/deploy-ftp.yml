@@ -24,6 +24,7 @@ jobs:
         env:
           BARBERSHOP_TAVILY_API_KEY: ${{ secrets.BARBERSHOP_TAVILY_API_KEY }}
           BARBERSHOP_OPENROUTER_API_KEY: ${{ secrets.BARBERSHOP_OPENROUTER_API_KEY }}
+          BARBER_SMTP_PASSWORD: ${{ secrets.BARBER_SMTP_PASSWORD }}
         run: |
           if [ -z "$BARBERSHOP_TAVILY_API_KEY" ] || [ -z "$BARBERSHOP_OPENROUTER_API_KEY" ]; then
             echo "::error::Configure BARBERSHOP_TAVILY_API_KEY e BARBERSHOP_OPENROUTER_API_KEY antes do deploy."
@@ -34,6 +35,13 @@ jobs:
           openrouter_b64="$(printf %s "$BARBERSHOP_OPENROUTER_API_KEY" | base64 -w0)"
           printf "%s\n"             "<?php"             "return ["             "  'tavily_api_key' => base64_decode('$tavily_b64'),"             "  'openrouter_api_key' => base64_decode('$openrouter_b64'),"             "  'openrouter_model' => 'openrouter/free',"             "];" > prospeccao/config.local.php
           chmod 600 prospeccao/config.local.php
+          if [ -z "$BARBER_SMTP_PASSWORD" ]; then
+            echo "::error::Configure BARBER_SMTP_PASSWORD antes do deploy."
+            exit 1
+          fi
+          smtp_b64="$(printf %s "$BARBER_SMTP_PASSWORD" | base64 -w0)"
+          printf "%s\n" "<?php" "return [" "  'enabled' => true," "  'smtp_host' => 'email-ssl.com.br'," "  'smtp_username' => 'contato@hpoffshore.com.br'," "  'smtp_password' => base64_decode('$smtp_b64')," "  'smtp_port' => 465," "  'smtp_secure' => 'ssl'," "  'from' => 'contato@hpoffshore.com.br'," "  'base_url' => 'https://sistemashp.com.br/barbershop'," "];" > mail.local.php
+          chmod 600 mail.local.php
 
       - name: Publicar na pasta barbershop
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
