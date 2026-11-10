@@ -55,15 +55,14 @@ function webConfig(): array
     }
     $loaded = true;
     $path = __DIR__ . '/config.php';
-    if (!is_file($path)) {
-        return $config;
+    if (is_file($path)) {
+        try {
+            $value = require $path;
+            $config = is_array($value) ? $value : [];
+        } catch (Throwable) {
+            $config = [];
+        }
     }
-    try {
-        $value = require $path;
-    } catch (Throwable) {
-        return $config;
-    }
-    $config = is_array($value) ? $value : [];
     $mailPath = __DIR__ . '/mail.local.php';
     if (is_file($mailPath)) {
         try {
@@ -535,7 +534,9 @@ function webSendResetMail(string $recipient, string $token, string $name): bool
     }
     $mail = webConfig()['mail'] ?? [];
     if (is_array($mail) && trim((string)($mail['smtp_host'] ?? '')) !== '') {
-        return webSmtpSend($recipient, $subject, $body);
+        if (webSmtpSend($recipient, $subject, $body)) return true;
+        // Some shared hosting plans expose SMTP intermittently but still provide
+        // the local mail transport. Try it before reporting failure.
     }
     $headers = 'From: ' . $from . "\r\nContent-Type: text/plain; charset=UTF-8\r\n";
     return @mail($recipient, $subject, $body, $headers);

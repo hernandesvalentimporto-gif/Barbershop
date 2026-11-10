@@ -686,9 +686,11 @@ function webHandleForgotPassword(): never
         throw $exception;
     }
 
+    $deliveryFailed = false;
     if ($token !== null && $tokenHash !== null && $recipient !== null) {
         $sent = webSendResetMail($recipient, $token, $name);
         if (!$sent) {
+            $deliveryFailed = true;
             // Do not leave a usable token when the configured transport failed.
             $delete = $pdo->prepare("DELETE FROM `{$prefix}password_resets`
                 WHERE token_hash = ? AND used_at IS NULL");
@@ -697,6 +699,7 @@ function webHandleForgotPassword(): never
     }
     // The opaque token is never included in the JSON response or application log.
     unset($token, $tokenHash, $recipient, $name);
+    if ($deliveryFailed) webJsonResponse(['ok' => true, 'email_enabled' => false, 'message' => 'Não foi possível enviar o e-mail agora. Tente novamente mais tarde.']);
     webGenericForgotResponse($emailEnabled);
 }
 
