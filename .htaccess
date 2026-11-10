@@ -1,4 +1,4 @@
-<FilesMatch "^(config\.php|\.installed|web-common\.php)$|\.sql$|^\.">
+<FilesMatch "^(config\.php|config\.local\.php|\.installed|web-common\.php)$|\.sql$|^\.">
     Require all denied
     Deny from all
 </FilesMatch>
