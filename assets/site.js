@@ -690,7 +690,7 @@
     }
 
     function platformSectionTabs() {
-        const sections = [['overview', 'Visão geral'], ['shops', 'Barbearias'], ['finance', 'Financeiro'], ['billing', 'Planos']];
+        const sections = [['overview', 'Visão geral'], ['shops', 'Barbearias'], ['finance', 'Financeiro'], ['billing', 'Planos'], ['prospecting', 'Prospecção']];
         return el('nav', { className: 'platform-tabs', role: 'group', 'aria-label': 'Áreas administrativas da plataforma' }, sections.map(([id, label]) => {
             const active = state.platformSection === id;
             const control = button(label, 'platform-tab', () => {
@@ -709,12 +709,55 @@
         return new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Sao_Paulo' }).format(parsed);
     }
 
+    function renderPlatformProspecting(hidden) {
+        const section = el('section', { className: 'card section-card platform-panel', hidden });
+        section.append(el('h3', { text: 'Prospecção de barbearias' }), el('p', { className: 'section-description', text: 'Encontre novas barbearias no Brasil. O contato é sempre iniciado manualmente por você.' }));
+        const form = el('form', { className: 'form-card', novalidate: true });
+        const stateInput = input('text', 'master-prospect-state', '', { maxlength: 80, placeholder: 'Ex.: SP', autocapitalize: 'characters' });
+        const cityInput = input('text', 'master-prospect-city', '', { maxlength: 120, placeholder: 'Ex.: São Paulo' });
+        const termInput = input('text', 'master-prospect-term', 'barbearia', { maxlength: 160, placeholder: 'Ex.: barbearia masculina' });
+        const submit = button('Buscar barbearias', 'button'); submit.type = 'submit';
+        const message = el('p', { className: 'form-message', role: 'status', 'aria-live': 'polite' });
+        const list = el('div', { className: 'record-list' });
+        form.append(el('div', { className: 'form-grid' }, [field('Estado', stateInput), field('Cidade', cityInput), field('Termo', termInput)]), message, el('div', { className: 'form-actions' }, [submit]));
+        function openContact(url) { window.open(url, '_blank', 'noopener,noreferrer'); }
+        function renderLeads(leads) {
+            clear(list);
+            if (!leads.length) { list.append(emptyState('Nenhuma barbearia encontrada', 'Tente outro estado, cidade ou termo.')); return; }
+            leads.forEach((lead) => {
+                const actions = [];
+                const phone = String(lead.phone || '').replace(/\D/g, '');
+                if (phone) actions.push(button('WhatsApp', 'button secondary small', () => openContact(`https://wa.me/${phone}`)));
+                if (lead.website) actions.push(button('Site', 'button secondary small', () => openContact(/^https?:\/\//i.test(lead.website) ? lead.website : `https://${lead.website}`)));
+                if (lead.email) actions.push(button('E-mail', 'button secondary small', () => { window.location.href = `mailto:${lead.email}`; }));
+                list.append(el('article', { className: 'record-row' }, [
+                    el('div', { className: 'record-main' }, [el('strong', { text: lead.name }), el('span', { text: lead.address || [lead.city, lead.state].filter(Boolean).join(' / ') || 'Localização não informada' }), lead.email ? el('span', { text: lead.email }) : null]),
+                    el('div', { className: 'record-secondary' }, [el('span', { className: 'status', text: lead.status_label || 'NOVO' }), el('div', { className: 'form-actions' }, actions)])
+                ]));
+            });
+        }
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            if (submit.disabled) return;
+            setButtonBusy(submit, true, 'Buscando...'); message.className = 'form-message'; message.textContent = '';
+            try {
+                const result = await api('master_prospect_search', { method: 'POST', body: { state: stateInput.value.trim(), city: cityInput.value.trim(), term: termInput.value.trim() } });
+                renderLeads(Array.isArray(result.leads) ? result.leads : []);
+                message.className = 'form-message success'; message.textContent = 'Busca concluída. Escolha um canal para iniciar o contato.';
+            } catch (error) {
+                message.className = 'form-message error'; message.textContent = friendlyError(error);
+            } finally { setButtonBusy(submit, false); }
+        });
+        section.append(form, list);
+        return section;
+    }
+
     async function renderPlatformPage(content) {
         const result = await api('platform_dashboard');
         const metrics = result.metrics || {};
         const upcoming = Array.isArray(result.upcoming) ? result.upcoming : [];
         const recentSignups = Array.isArray(result.recent_signups) ? result.recent_signups : [];
-        if (!['overview', 'shops', 'finance', 'billing', 'detail'].includes(state.platformSection)) state.platformSection = 'overview';
+        if (!['overview', 'shops', 'finance', 'billing', 'prospecting', 'detail'].includes(state.platformSection)) state.platformSection = 'overview';
         const sectionKey = state.platformSection;
         clear(content);
         content.append(pageIntro(sectionKey === 'detail' ? 'Cadastro da barbearia' : 'Painel da plataforma', sectionKey === 'detail' ? 'Dados comerciais e usuários vinculados a esta conta.' : 'Gerencie sua plataforma SaaS, as barbearias, o financeiro e os planos.', [button('Atualizar dados', 'button secondary', () => renderApp())]));
@@ -770,6 +813,7 @@
             recentSection.append(recentList);
         }
         content.append(recentSection);
+        content.append(renderPlatformProspecting(sectionKey !== 'prospecting'));
 
         const customersSection = el('section', { className: 'card section-card', hidden: sectionKey !== 'shops' }, [
             el('h3', { text: 'Clientes comerciais' }),
