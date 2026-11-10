@@ -320,6 +320,26 @@
         });
     }
 
+    function normalizeSearchText(value) {
+        return String(value || '').trim().toLocaleLowerCase('pt-BR').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    }
+
+    function bindSearchToSelect(searchInput, select, items, fields) {
+        const itemById = new Map(items.map((item) => [String(item.id), item]));
+        const applyFilter = () => {
+            const query = normalizeSearchText(searchInput.value);
+            Array.from(select.options).forEach((option) => {
+                if (!option.value) return;
+                const item = itemById.get(String(option.value));
+                const phoneDigits = item && item.phone ? String(item.phone).replace(/\D/g, '') : '';
+                const searchable = item ? `${fields.map((key) => item[key] || '').join(' ')} ${phoneDigits}` : option.textContent || '';
+                option.hidden = Boolean(query) && !normalizeSearchText(searchable).includes(query) && !option.selected;
+            });
+        };
+        searchInput.addEventListener('input', applyFilter);
+        applyFilter();
+    }
+
     function navItems(role) {
         if (state.user && state.user.platform_admin) return [['platform', 'Plataforma', 'PL'], ['account', 'Conta', 'CT']];
         if (role === 'admin') return [
@@ -1409,20 +1429,28 @@
         const barberSelect = selectInput('booking-barber', { required: true });
         const serviceSelect = selectInput('booking-service', { required: true, multiple: true, size: 4 });
         serviceSelect.setAttribute('aria-label', 'Selecione um ou mais serviços');
+        const barberSearch = input('search', 'booking-barber-search', '', { placeholder: 'Buscar por nome', autocomplete: 'off' });
+        const serviceSearch = input('search', 'booking-service-search', '', { placeholder: 'Buscar serviço', autocomplete: 'off' });
         const slotSelect = selectInput('booking-slot', { required: true, disabled: true });
         const notes = el('textarea', { id: 'booking-notes', maxlength: 500, placeholder: 'Opcional, até 500 caracteres' });
         addSelectOptions(barberSelect, options.barbers, 'Selecione o barbeiro');
         addSelectOptions(serviceSelect, options.services, 'Selecione o serviço');
+        bindSearchToSelect(barberSearch, barberSelect, options.barbers, ['name']);
+        bindSearchToSelect(serviceSearch, serviceSelect, options.services, ['name', 'description']);
         clear(slotSelect);
         slotSelect.appendChild(el('option', { value: '', text: 'Escolha barbeiro e serviço primeiro' }));
         const clientSelect = options.admin ? selectInput('booking-client', { required: true }) : null;
-        if (clientSelect) addSelectOptions(clientSelect, options.clients, 'Selecione o cliente');
+        const clientSearch = options.admin ? input('search', 'booking-client-search', '', { placeholder: 'Nome, WhatsApp ou e-mail', autocomplete: 'off' }) : null;
+        if (clientSelect) {
+            addSelectOptions(clientSelect, options.clients, 'Selecione o cliente');
+            bindSearchToSelect(clientSearch, clientSelect, options.clients, ['name', 'phone', 'email']);
+        }
         const message = el('p', { className: 'form-message', role: 'status', 'aria-live': 'polite' });
         const submit = button('Confirmar agendamento', 'button');
         submit.type = 'submit';
         const grid = el('div', { className: 'form-grid three' });
-        if (clientSelect) grid.append(field('Cliente', clientSelect));
-        grid.append(field('Data', dateInput), field('Barbeiro', barberSelect), field('Serviços (selecione um ou mais)', serviceSelect), field('Horário disponível', slotSelect), field('Observações', notes));
+        if (clientSelect) grid.append(field('Buscar cliente', clientSearch), field('Cliente', clientSelect));
+        grid.append(field('Data', dateInput), field('Buscar barbeiro', barberSearch), field('Barbeiro', barberSelect), field('Buscar serviço', serviceSearch), field('Serviços (selecione um ou mais)', serviceSelect), field('Horário disponível', slotSelect), field('Observações', notes));
         form.append(grid, message, el('div', { className: 'form-actions' }, [submit]));
         panel.append(el('h3', { text: options.admin ? 'Novo atendimento' : 'Agendar para mim' }), el('p', { text: options.admin ? 'O horário abaixo será consultado na API antes do salvamento.' : 'Escolha uma opção de horário retornada pela agenda.' }), form);
 
@@ -1442,14 +1470,19 @@
                 const result = await api('availability', { params: { date: dateInput.value, barber_id: barberSelect.value, service_ids: selectedServiceIds.join(',') } });
                 clear(slotSelect);
                 const slots = Array.isArray(result.slots) ? result.slots : [];
-                slotSelect.appendChild(el('option', { value: '', text: slots.length ? 'Selecione o horário' : 'Nenhum horário disponível' }));
+                const busySlots = Array.isArray(result.busy_slots) ? result.busy_slots : [];
+                slotSelect.appendChild(el('option', { value: '', text: slots.length ? 'Selecione o horário' : busySlots.length ? 'Todos os horários estão ocupados' : 'Nenhum horário disponível' }));
                 slots.forEach((slot) => {
                     const option = el('option', { value: slot.starts_at, text: `${formatTime(slot.starts_at)} – ${formatTime(slot.ends_at)}` });
                     option.dataset.endsAt = slot.ends_at;
                     slotSelect.appendChild(option);
                 });
-                slotSelect.disabled = !slots.length;
-                if (!slots.length) message.textContent = 'Não há horários livres para esta combinação.';
+                busySlots.forEach((slot) => {
+                    slotSelect.appendChild(el('option', { value: `busy:${slot.starts_at}`, text: `${formatTime(slot.starts_at)} – ${formatTime(slot.ends_at)} · Ocupado`, disabled: true }));
+                });
+                slotSelect.disabled = !slots.length && !busySlots.length;
+                if (!slots.length) message.textContent = busySlots.length ? 'Todos os horários listados estão ocupados. Escolha outra data ou barbeiro.' : 'Não há horários livres para esta combinação.';
+                else if (busySlots.length) message.textContent = 'Os horários ocupados aparecem desabilitados.';
             } catch (error) {
                 clear(slotSelect);
                 slotSelect.appendChild(el('option', { value: '', text: 'Não foi possível carregar horários' }));
@@ -1489,6 +1522,7 @@
                     navigate('history');
                 }
             } catch (error) {
+                if (error instanceof ApiError && error.code === 'appointment_conflict') await refreshSlots();
                 message.className = 'form-message error';
                 message.textContent = friendlyError(error);
             } finally {

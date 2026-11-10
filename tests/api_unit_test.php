@@ -21,12 +21,13 @@ function check(bool $condition, string $message): void
 $validUser = apiValidateUserPayload([
     'name' => 'Cliente Local',
     'email' => 'cliente@example.test',
+    'phone' => '(11) 99999-9999',
     'role' => 'client',
     'status' => 'active',
     'password' => 'strong-pass-8',
 ]);
 check($validUser['ok'] === true, 'valid client payload is accepted');
-check($validUser['email'] === 'cliente@example.test', 'email is normalized');
+check($validUser['email'] === apiInternalClientEmail((string)apiNormalizePhone('(11) 99999-9999')), 'client email is derived from normalized phone');
 
 $adminUser = apiValidateUserPayload([
     'name' => 'Admin Attempt',
@@ -39,6 +40,7 @@ check($adminUser['ok'] === false, 'admin role cannot be supplied to user_save');
 
 $shortPassword = apiValidateUserPayload([
     'name' => 'Cliente Local',
+    'phone' => '(11) 99999-1111',
     'email' => 'cliente2@example.test',
     'role' => 'client',
     'status' => 'active',
@@ -89,6 +91,27 @@ $outsideHours = apiValidateAppointmentWindow(
     $future
 );
 check($outsideHours['ok'] === false && $outsideHours['error'] === 'appointment_outside_hours', 'appointments cannot pass 18:00');
+
+$busyWindow = [[
+    'starts_at' => '2026-11-04 09:00:00',
+    'ends_at' => '2026-11-04 10:00:00',
+]];
+check(
+    apiAvailabilitySlotIsBlocked(
+        apiParseLocalDateTime('2026-11-04 09:30'),
+        apiParseLocalDateTime('2026-11-04 10:30'),
+        $busyWindow
+    ),
+    'availability marks slots overlapping an active booking as busy'
+);
+check(
+    !apiAvailabilitySlotIsBlocked(
+        apiParseLocalDateTime('2026-11-04 10:00'),
+        apiParseLocalDateTime('2026-11-04 10:30'),
+        $busyWindow
+    ),
+    'adjacent slots remain available when one booking ends at the slot start'
+);
 
 $mismatchedEnd = apiValidateAppointmentWindow(
     apiParseLocalDateTime('2026-11-04 10:00'),

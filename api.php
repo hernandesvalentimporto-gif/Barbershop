@@ -1529,6 +1529,20 @@ function handleCatalog(PDO $pdo, string $prefix, array $user): never
     jsonResponse(['ok' => true, 'services' => $services, 'barbers' => $barbers]);
 }
 
+function apiAvailabilitySlotIsBlocked(DateTimeImmutable $start, DateTimeImmutable $end, array $busyAppointments): bool
+{
+    foreach ($busyAppointments as $appointment) {
+        $busyStart = (string)($appointment['starts_at'] ?? '');
+        $busyEnd = (string)($appointment['ends_at'] ?? '');
+        if ($busyStart !== '' && $busyEnd !== ''
+            && $start->format('Y-m-d H:i:s') < $busyEnd
+            && $end->format('Y-m-d H:i:s') > $busyStart) {
+            return true;
+        }
+    }
+    return false;
+}
+
 function handleAvailability(PDO $pdo, string $prefix, array $user): never
 {
     apiRequireMethod('GET');
@@ -1560,7 +1574,7 @@ function handleAvailability(PDO $pdo, string $prefix, array $user): never
     $schedule = apiWorkScheduleResponse($barberRow['work_schedule'] ?? null);
     $dayKeys = [1 => 'mon', 2 => 'tue', 3 => 'wed', 4 => 'thu', 5 => 'fri', 6 => 'sat', 7 => 'sun'];
     $daySchedule = $schedule[$dayKeys[(int)$date->format('N')]];
-    if (!$daySchedule['enabled']) { jsonResponse(['ok' => true, 'slots' => []]); }
+    if (!$daySchedule['enabled']) { jsonResponse(['ok' => true, 'slots' => [], 'busy_slots' => []]); }
     [$startHour, $startMinute] = array_map('intval', explode(':', $daySchedule['start']));
     [$endHour, $endMinute] = array_map('intval', explode(':', $daySchedule['end']));
     $workStartMinutes = $startHour * 60 + $startMinute;
@@ -1581,25 +1595,22 @@ function handleAvailability(PDO $pdo, string $prefix, array $user): never
     $busy = $appointments->fetchAll();
     $now = new DateTimeImmutable('now', apiTimezone());
     $slots = [];
+    $busySlots = [];
     for ($minutes = $workStartMinutes; $minutes <= $workEndMinutes - $duration; $minutes += 30) {
         $start = $date->setTime(intdiv($minutes, 60), $minutes % 60, 0);
         $end = $start->modify('+' . $duration . ' minutes');
         if ($start <= $now) {
             continue;
         }
-        $blocked = false;
-        foreach ($busy as $item) {
-            if ($start->format('Y-m-d H:i:s') < (string)$item['ends_at'] && $end->format('Y-m-d H:i:s') > (string)$item['starts_at']) {
-                $blocked = true;
-                break;
-            }
-        }
-        if (!$blocked) {
-            // Only slot times are returned; no other client's identity or details are exposed.
-            $slots[] = ['starts_at' => $start->format('Y-m-d H:i:s'), 'ends_at' => $end->format('Y-m-d H:i:s')];
+        $slot = ['starts_at' => $start->format('Y-m-d H:i:s'), 'ends_at' => $end->format('Y-m-d H:i:s')];
+        if (apiAvailabilitySlotIsBlocked($start, $end, $busy)) {
+            // Return time ranges only; do not disclose who booked the slot.
+            $busySlots[] = $slot;
+        } else {
+            $slots[] = $slot;
         }
     }
-    jsonResponse(['ok' => true, 'slots' => $slots]);
+    jsonResponse(['ok' => true, 'slots' => $slots, 'busy_slots' => $busySlots]);
 }
 
 function handleSummary(PDO $pdo, string $prefix, array $user): never
