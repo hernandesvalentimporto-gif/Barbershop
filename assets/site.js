@@ -413,8 +413,11 @@
         const pageTitle = pageTitleFor(state.view, user.role);
         const topbar = el('header', { className: 'topbar' }, [
             el('div', { className: 'topbar-title' }, [
-                el('div', { className: 'eyebrow', text: 'SISTEMAS HP' }),
-                el('h1', { text: pageTitle })
+                el('img', { className: 'topbar-brand-image', src: 'assets/logo.png', width: 52, height: 48, alt: 'Barber Shop Sistemas HP' }),
+                el('div', { className: 'topbar-copy' }, [
+                    el('div', { className: 'eyebrow', text: 'SISTEMAS HP' }),
+                    el('h1', { text: pageTitle })
+                ])
             ]),
             el('div', { className: 'topbar-actions' }, [
                 el('span', { className: 'user-role', text: user.name }),
