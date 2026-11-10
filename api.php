@@ -996,6 +996,27 @@ function handleMasterProspectSearch(PDO $pdo, string $prefix, array $user): neve
         $docs[$id] = ['url' => $url, 'title' => $title, 'text' => $text];
     }
     if (!$docs) apiError('prospecting_no_results', 404);
+    // Primeiro salva resultados públicos diretamente. Esta etapa não depende da IA
+    // nem do endpoint Extract e mantém a prospecção utilizável mesmo quando um
+    // provedor de enriquecimento está indisponível.
+    $insert = $pdo->prepare("INSERT INTO `{$prefix}prospect_leads` (fingerprint,name,phone,email,website,address,city,state,source_url) VALUES (?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE name=VALUES(name),phone=COALESCE(VALUES(phone),phone),email=COALESCE(VALUES(email),email),website=COALESCE(VALUES(website),website),address=COALESCE(VALUES(address),address),city=COALESCE(VALUES(city),city),state=COALESCE(VALUES(state),state),source_url=COALESCE(VALUES(source_url),source_url),updated_at=CURRENT_TIMESTAMP");
+    $count = 0;
+    foreach ($docs as $doc) {
+        $name = apiProspectFallbackName($doc['title']);
+        if ($name === '') continue;
+        $evidenceText = $doc['title'] . "\n" . $doc['text'];
+        preg_match('/[A-Z0-9._%+\\-]+@[A-Z0-9.\\-]+\\.[A-Z]{2,}/iu', $evidenceText, $emailMatch);
+        preg_match('/(?:\\+?55[\\s.-]*)?(?:\\(?[0-9]{2}\\)?[\\s.-]*)?9?[0-9]{4}[\\s.-]*[0-9]{4}/', $evidenceText, $phoneMatch);
+        $email = isset($emailMatch[0]) && filter_var($emailMatch[0], FILTER_VALIDATE_EMAIL) ? strtolower($emailMatch[0]) : null;
+        $phone = isset($phoneMatch[0]) ? apiProspectText($phoneMatch[0], 40) : null;
+        $fingerprint = hash('sha256', strtolower(trim($name . '||' . $doc['url'])));
+        $insert->execute([$fingerprint, $name, $phone, $email, $doc['url'], null, null, $filters['state'] ?: null, $doc['url']]);
+        $count++;
+    }
+    $run = $pdo->prepare("INSERT INTO `{$prefix}prospect_search_runs` (query_text,state,city,result_count,status) VALUES (?,?,?,?, 'completed')");
+    $run->execute([$query, $filters['state'] ?: null, $filters['city'] ?: null, $count]);
+    jsonResponse(['ok' => true, 'search_id' => (int)$pdo->lastInsertId(), 'saved_count' => $count, 'leads' => apiProspectFetchLeads($pdo, $prefix, $filters)]);
+    /* Enrichment by Extract/OpenRouter remains below for a later optional phase. */
     // Enrich the snippets with Tavily Extract. If Extract is unavailable, retain the search snippets.
     $extract = apiProspectHttp('https://api.tavily.com/extract', ['Content-Type: application/json', 'Authorization: Bearer ' . $tavily], apiProspectEncode(['urls' => array_values(array_column($docs, 'url')), 'extract_depth' => 'basic']));
     if ($extract['status'] >= 200 && $extract['status'] < 300) {
