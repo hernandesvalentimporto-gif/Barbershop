@@ -1782,8 +1782,10 @@ function runApi(): never
             $pdo->rollBack();
         }
         if (in_array((string)($_GET['action'] ?? ''), ['master_prospect_search', 'master_prospect_leads'], true)) {
-            error_log('Barbershop prospecting runtime error: ' . get_class($exception) . ': ' . $exception->getMessage());
-            apiError('prospecting_runtime_error', 500);
+            $detail = get_class($exception) . ': ' . $exception->getMessage();
+            $detail = preg_replace('/Bearer\s+\S+|(?:api[_-]?key|password|secret)\s*[=:]\s*\S+/i', '[oculto]', $detail) ?? '[detalhe oculto]';
+            error_log('Barbershop prospecting runtime error: ' . $detail);
+            jsonResponse(['ok' => false, 'error' => 'prospecting_runtime_error', 'message' => 'Diagnóstico técnico: ' . apiProspectText($detail, 260)], 500);
         }
         // Never return driver messages, SQL, credentials, or stack traces to clients.
         apiError('internal_error', 500);
