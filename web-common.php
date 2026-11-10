@@ -469,6 +469,49 @@ function webResetLink(string $token): ?string
     return $base . '/index.php?view=reset#token=' . rawurlencode($token);
 }
 
+function webMailLog(array $entry): void
+{
+    $entry['at'] = gmdate('c');
+    unset($entry['password'], $entry['smtp_password']);
+    $line = json_encode($entry, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+    if ($line !== false) { @file_put_contents(__DIR__ . '/mail-debug.log', $line . "\n", FILE_APPEND | LOCK_EX); @chmod(__DIR__ . '/mail-debug.log', 0600); }
+}
+function webSmtpTest(string $recipient, bool $send = true): array
+{
+    $config = webConfig(); $mail = is_array($config['mail'] ?? null) ? $config['mail'] : [];
+    $host = trim((string)($mail['smtp_host'] ?? '')); $user = trim((string)($mail['smtp_username'] ?? '')); $pass = (string)($mail['smtp_password'] ?? '');
+    $port = (int)($mail['smtp_port'] ?? 465); $secure = strtolower(trim((string)($mail['smtp_secure'] ?? 'ssl')));
+    $result = ['ok' => false, 'recipient' => $recipient, 'host' => $host, 'port' => $port, 'secure' => strtoupper($secure), 'stages' => []];
+    $stage = static function (array &$result, string $name, string $status, string $detail = ''): void { $result['stages'][] = ['name' => $name, 'status' => $status, 'detail' => $detail]; };
+    if ($host === '' || $user === '' || $pass === '') { $stage($result, 'configuração', 'erro', 'Host, usuário ou senha SMTP ausente.'); webMailLog(['event'=>'smtp_test','result'=>$result]); return $result; }
+    if (!filter_var($recipient, FILTER_VALIDATE_EMAIL)) { $stage($result, 'destinatário', 'erro', 'E-mail de teste inválido.'); webMailLog(['event'=>'smtp_test','result'=>$result]); return $result; }
+    $remote = ($secure === 'ssl' ? 'ssl://' : '') . $host . ':' . $port;
+    $errno = 0; $errstr = ''; $socket = @stream_socket_client($remote, $errno, $errstr, 15, STREAM_CLIENT_CONNECT);
+    if (!is_resource($socket)) { $stage($result, 'conexão', 'erro', 'Não foi possível conectar ao servidor SMTP.'); webMailLog(['event'=>'smtp_test','result'=>$result,'errno'=>$errno]); return $result; }
+    stream_set_timeout($socket, 15);
+    $read = static function () use ($socket): string { $out=''; while (($line=fgets($socket,515))!==false) { $out.=$line; if (isset($line[3]) && $line[3]===' ') break; } return $out; };
+    $code = static function (string $reply): string { return preg_match('/^([0-9]{3})/m', $reply, $m) ? $m[1] : 'sem resposta'; };
+    $write = static function (string $command) use ($socket): void { fwrite($socket, $command."\r\n"); };
+    $reply=$read(); if (!str_starts_with($code($reply), '2')) { $stage($result,'saudação','erro','Servidor respondeu código '.$code($reply).'.'); fclose($socket); webMailLog(['event'=>'smtp_test','result'=>$result]); return $result; }
+    $stage($result,'conexão','ok','Servidor SMTP respondeu.');
+    $domain = parse_url(webTrustedBaseUrl() ?: 'https://localhost', PHP_URL_HOST) ?: 'localhost'; $write('EHLO '.$domain); $reply=$read();
+    if (!str_starts_with($code($reply), '2')) { $stage($result,'EHLO','erro','Servidor respondeu código '.$code($reply).'.'); fclose($socket); webMailLog(['event'=>'smtp_test','result'=>$result]); return $result; }
+    $stage($result,'EHLO','ok','Servidor aceitou a identificação.');
+    if ($secure === 'tls') { $write('STARTTLS'); $reply=$read(); if (!str_starts_with($code($reply),'2') || !@stream_socket_enable_crypto($socket,true,STREAM_CRYPTO_METHOD_TLS_CLIENT)) { $stage($result,'TLS','erro','Não foi possível ativar TLS.'); fclose($socket); webMailLog(['event'=>'smtp_test','result'=>$result]); return $result; } $write('EHLO '.$domain); $read(); }
+    $write('AUTH LOGIN'); $reply=$read(); if ($code($reply)!=='334') { $stage($result,'autenticação','erro','Servidor não aceitou AUTH LOGIN (código '.$code($reply).').'); fclose($socket); webMailLog(['event'=>'smtp_test','result'=>$result]); return $result; }
+    $write(base64_encode($user)); $reply=$read(); if ($code($reply)!=='334') { $stage($result,'autenticação','erro','Usuário SMTP recusado (código '.$code($reply).').'); fclose($socket); webMailLog(['event'=>'smtp_test','result'=>$result]); return $result; }
+    $write(base64_encode($pass)); $reply=$read(); if ($code($reply)!=='235') { $stage($result,'autenticação','erro','Senha SMTP recusada ou conta bloqueada (código '.$code($reply).').'); fclose($socket); webMailLog(['event'=>'smtp_test','result'=>$result]); return $result; }
+    $stage($result,'autenticação','ok','Usuário e senha aceitos pelo servidor.');
+    if ($send) {
+        $from=webMailFrom(); $write('MAIL FROM:<'.$from.'>'); $reply=$read(); if (!str_starts_with($code($reply),'2')) { $stage($result,'remetente','erro','Remetente recusado (código '.$code($reply).').'); fclose($socket); webMailLog(['event'=>'smtp_test','result'=>$result]); return $result; }
+        $write('RCPT TO:<'.$recipient.'>'); $reply=$read(); if (!str_starts_with($code($reply),'2')) { $stage($result,'destinatário','erro','Destinatário recusado (código '.$code($reply).').'); fclose($socket); webMailLog(['event'=>'smtp_test','result'=>$result]); return $result; }
+        $stage($result,'destinatário','ok','Destinatário aceito.'); $write('DATA'); $reply=$read(); if ($code($reply)!=='354') { $stage($result,'mensagem','erro','Servidor não aceitou o conteúdo (código '.$code($reply).').'); fclose($socket); webMailLog(['event'=>'smtp_test','result'=>$result]); return $result; }
+        $from=webMailFrom() ?: $user; $subject='Teste SMTP - Barber Shop'; $body='Este é um teste de envio SMTP do Barber Shop. Se você recebeu esta mensagem, o SMTP está funcionando.'; $payload='From: '.$from."\r\nTo: ".$recipient."\r\nSubject: ".$subject."\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n".$body; fwrite($socket,$payload."\r\n.\r\n"); $reply=$read(); if (!str_starts_with($code($reply),'2')) { $stage($result,'mensagem','erro','Servidor recusou a mensagem (código '.$code($reply).').'); fclose($socket); webMailLog(['event'=>'smtp_test','result'=>$result]); return $result; }
+        $stage($result,'mensagem','ok','Mensagem aceita para entrega.');
+    }
+    fclose($socket); $result['ok']=true; webMailLog(['event'=>'smtp_test','result'=>$result]); return $result;
+}
+
 function webSmtpSend(string $recipient, string $subject, string $body): bool
 {
     $config = webConfig(); $mail = is_array($config['mail'] ?? null) ? $config['mail'] : [];
@@ -535,6 +578,7 @@ function webSendResetMail(string $recipient, string $token, string $name): bool
     $mail = webConfig()['mail'] ?? [];
     if (is_array($mail) && trim((string)($mail['smtp_host'] ?? '')) !== '') {
         if (webSmtpSend($recipient, $subject, $body)) return true;
+        webMailLog(['event' => 'password_reset_delivery_failed', 'recipient_domain' => substr(strrchr($recipient, '@') ?: '', 1)]);
         // Some shared hosting plans expose SMTP intermittently but still provide
         // the local mail transport. Try it before reporting failure.
     }

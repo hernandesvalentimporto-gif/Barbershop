@@ -777,6 +777,17 @@ function webHandleResetPassword(): never
  * All non-account actions go through the original API handlers. The bearer is
  * injected only server-side, and the PHP session is already closed.
  */
+function webHandleMailTest(): never
+{
+    webRequireMethod('POST');
+    $context = webAuthenticatedContext(true);
+    if (!(bool)($context['user']['platform_admin'] ?? false)) webError('forbidden', 403);
+    $data = webReadJsonBody();
+    $recipient = is_string($data['recipient'] ?? null) ? strtolower(trim($data['recipient'])) : '';
+    $result = webSmtpTest($recipient, true);
+    webJsonResponse(['ok' => (bool)$result['ok'], 'result' => $result]);
+}
+
 function webDelegateToApi(string $action): never
 {
     $context = webAuthenticatedContext(webRequestMethod() !== 'GET');
@@ -825,6 +836,8 @@ function webDispatch(): never
             webHandlePlatformPlanSave();
         case 'platform_checkout':
             webHandlePlatformCheckout();
+        case 'mail_test':
+            webHandleMailTest();
         default:
             webDelegateToApi($action);
     }

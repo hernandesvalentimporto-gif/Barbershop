@@ -697,7 +697,7 @@
     }
 
     function platformSectionTabs() {
-        const sections = [['overview', 'Visão geral'], ['shops', 'Barbearias'], ['finance', 'Financeiro'], ['billing', 'Planos'], ['prospecting', 'Prospecção']];
+        const sections = [['overview', 'Visão geral'], ['shops', 'Barbearias'], ['finance', 'Financeiro'], ['billing', 'Planos'], ['prospecting', 'Prospecção'], ['mailtest', 'Teste de e-mail']];
         return el('nav', { className: 'platform-tabs', role: 'group', 'aria-label': 'Áreas administrativas da plataforma' }, sections.map(([id, label]) => {
             const active = state.platformSection === id;
             const control = button(label, 'platform-tab', () => {
@@ -753,12 +753,21 @@
         section.append(form, list); return section;
     }
 
+    function renderPlatformMailTest(hidden) {
+        const section = el('section', { className: 'card section-card platform-panel', hidden });
+        section.append(el('h3', { text: 'Teste de e-mail SMTP' }), el('p', { className: 'section-description', text: 'Envie um e-mail de teste e veja exatamente em qual etapa o servidor respondeu.' }));
+        const form=el('form',{className:'form-card',novalidate:true}); const recipient=input('email','smtp-test-recipient','hernandesporto@gmail.com',{required:true,autocomplete:'email'}); const submit=button('Enviar teste SMTP','button'); submit.type='submit'; const message=el('p',{className:'form-message',role:'status','aria-live':'polite'}); const resultBox=el('div',{className:'record-list'});
+        form.append(el('div',{className:'form-grid'},[field('E-mail que receberá o teste',recipient)]),message,el('div',{className:'form-actions'},[submit]));
+        form.addEventListener('submit',async(e)=>{e.preventDefault(); if(!form.reportValidity()||submit.disabled)return; setButtonBusy(submit,true,'Testando...'); clear(resultBox); message.className='form-message'; message.textContent=''; try { const response=await api('mail_test',{method:'POST',body:{recipient:recipient.value.trim()}}); const r=response.result||{}; message.className='form-message '+(r.ok?'success':'error'); message.textContent=r.ok?'Teste aceito pelo servidor SMTP. Confira a caixa de entrada e o spam.':'O teste falhou. Veja a etapa marcada em vermelho.'; resultBox.append(el('article',{className:'record-row'},[el('div',{className:'record-main'},[el('strong',{text:`Servidor: ${r.host||'não informado'}:${r.port||''} (${r.secure||''})`}),...(r.stages||[]).map(st=>el('span',{text:`${st.status==='ok'?'✓':'✗'} ${st.name}: ${st.detail}`}))])])); } catch(err){message.className='form-message error';message.textContent=friendlyError(err);} finally{setButtonBusy(submit,false);}});
+        section.append(form,resultBox); return section;
+    }
+
     async function renderPlatformPage(content) {
         const result = await api('platform_dashboard');
         const metrics = result.metrics || {};
         const upcoming = Array.isArray(result.upcoming) ? result.upcoming : [];
         const recentSignups = Array.isArray(result.recent_signups) ? result.recent_signups : [];
-        if (!['overview', 'shops', 'finance', 'billing', 'prospecting', 'detail'].includes(state.platformSection)) state.platformSection = 'overview';
+        if (!['overview', 'shops', 'finance', 'billing', 'prospecting', 'mailtest', 'detail'].includes(state.platformSection)) state.platformSection = 'overview';
         const sectionKey = state.platformSection;
         clear(content);
         content.append(pageIntro(sectionKey === 'detail' ? 'Cadastro da barbearia' : 'Painel da plataforma', sectionKey === 'detail' ? 'Dados comerciais e usuários vinculados a esta conta.' : 'Gerencie sua plataforma SaaS, as barbearias, o financeiro e os planos.', [button('Atualizar dados', 'button secondary', () => renderApp())]));
@@ -815,6 +824,7 @@
         }
         content.append(recentSection);
         content.append(renderPlatformProspecting(sectionKey !== 'prospecting'));
+        content.append(renderPlatformMailTest(sectionKey !== 'mailtest'));
 
         const customersSection = el('section', { className: 'card section-card', hidden: sectionKey !== 'shops' }, [
             el('h3', { text: 'Clientes comerciais' }),
