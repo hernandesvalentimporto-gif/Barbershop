@@ -917,8 +917,10 @@ function apiProspectHttp(string $url, array $headers, string $body): array
 
 function apiProspectFilters(array $data): array
 {
+    $states = ['AC'=>'AC','AL'=>'AL','AP'=>'AP','AM'=>'AM','BA'=>'BA','CE'=>'CE','DF'=>'DF','ES'=>'ES','GO'=>'GO','MA'=>'MA','MT'=>'MT','MS'=>'MS','MG'=>'MG','PA'=>'PA','PB'=>'PB','PR'=>'PR','PE'=>'PE','PI'=>'PI','RJ'=>'RJ','RN'=>'RN','RS'=>'RS','RO'=>'RO','RR'=>'RR','SC'=>'SC','SP'=>'SP','SE'=>'SE','TO'=>'TO'];
+    $state = strtoupper(apiProspectText($data['state'] ?? '', 80));
     return [
-        'state' => strtoupper(apiProspectText($data['state'] ?? '', 80)),
+        'state' => $states[$state] ?? '',
         'city' => apiProspectText($data['city'] ?? '', 120),
         'term' => apiProspectText($data['term'] ?? 'barbearia', 160),
     ];

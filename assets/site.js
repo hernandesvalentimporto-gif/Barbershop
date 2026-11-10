@@ -711,45 +711,39 @@
 
     function renderPlatformProspecting(hidden) {
         const section = el('section', { className: 'card section-card platform-panel', hidden });
-        section.append(el('h3', { text: 'Prospecção de barbearias' }), el('p', { className: 'section-description', text: 'Encontre novas barbearias no Brasil. O contato é sempre iniciado manualmente por você.' }));
+        section.append(el('h3', { text: 'Prospecção de barbearias' }), el('p', { className: 'section-description', text: 'Escolha Brasil inteiro ou um estado. Os resultados trazem nome, e-mail, telefone e endereço quando encontrados.' }));
         const form = el('form', { className: 'form-card', novalidate: true });
-        const stateInput = input('text', 'master-prospect-state', '', { maxlength: 80, placeholder: 'Ex.: SP', autocapitalize: 'characters' });
-        const cityInput = input('text', 'master-prospect-city', '', { maxlength: 120, placeholder: 'Ex.: São Paulo' });
-        const termInput = input('text', 'master-prospect-term', 'barbearia', { maxlength: 160, placeholder: 'Ex.: barbearia masculina' });
+        const states = [['', 'Brasil inteiro'], ['AC', 'Acre'], ['AL', 'Alagoas'], ['AP', 'Amapá'], ['AM', 'Amazonas'], ['BA', 'Bahia'], ['CE', 'Ceará'], ['DF', 'Distrito Federal'], ['ES', 'Espírito Santo'], ['GO', 'Goiás'], ['MA', 'Maranhão'], ['MT', 'Mato Grosso'], ['MS', 'Mato Grosso do Sul'], ['MG', 'Minas Gerais'], ['PA', 'Pará'], ['PB', 'Paraíba'], ['PR', 'Paraná'], ['PE', 'Pernambuco'], ['PI', 'Piauí'], ['RJ', 'Rio de Janeiro'], ['RN', 'Rio Grande do Norte'], ['RS', 'Rio Grande do Sul'], ['RO', 'Rondônia'], ['RR', 'Roraima'], ['SC', 'Santa Catarina'], ['SP', 'São Paulo'], ['SE', 'Sergipe'], ['TO', 'Tocantins']];
+        const stateSelect = selectInput('master-prospect-state'); addSelectOptions(stateSelect, states.map(([id, name]) => ({ id, name })), null);
+        const termInput = input('text', 'master-prospect-term', 'barbearia', { maxlength: 160, placeholder: 'Ex.: barbearia, salão masculino' });
         const submit = button('Buscar barbearias', 'button'); submit.type = 'submit';
         const message = el('p', { className: 'form-message', role: 'status', 'aria-live': 'polite' });
         const list = el('div', { className: 'record-list' });
-        form.append(el('div', { className: 'form-grid' }, [field('Estado', stateInput), field('Cidade', cityInput), field('Termo', termInput)]), message, el('div', { className: 'form-actions' }, [submit]));
+        form.append(el('div', { className: 'form-grid' }, [field('Localização', stateSelect), field('O que procurar', termInput)]), message, el('div', { className: 'form-actions' }, [submit]));
         function openContact(url) { window.open(url, '_blank', 'noopener,noreferrer'); }
         function renderLeads(leads) {
             clear(list);
-            if (!leads.length) { list.append(emptyState('Nenhuma barbearia encontrada', 'Tente outro estado, cidade ou termo.')); return; }
+            if (!leads.length) { list.append(emptyState('Nenhuma barbearia encontrada', 'Tente Brasil inteiro ou outro estado.')); return; }
             leads.forEach((lead) => {
-                const actions = [];
-                const phone = String(lead.phone || '').replace(/\D/g, '');
+                const actions = []; const phone = String(lead.phone || '').replace(/\D/g, '');
                 if (phone) actions.push(button('WhatsApp', 'button secondary small', () => openContact(`https://wa.me/${phone}`)));
                 if (lead.website) actions.push(button('Site', 'button secondary small', () => openContact(/^https?:\/\//i.test(lead.website) ? lead.website : `https://${lead.website}`)));
                 if (lead.email) actions.push(button('E-mail', 'button secondary small', () => { window.location.href = `mailto:${lead.email}`; }));
-                list.append(el('article', { className: 'record-row' }, [
-                    el('div', { className: 'record-main' }, [el('strong', { text: lead.name }), el('span', { text: lead.address || [lead.city, lead.state].filter(Boolean).join(' / ') || 'Localização não informada' }), lead.email ? el('span', { text: lead.email }) : null]),
-                    el('div', { className: 'record-secondary' }, [el('span', { className: 'status', text: lead.status_label || 'NOVO' }), el('div', { className: 'form-actions' }, actions)])
-                ]));
+                list.append(el('article', { className: 'record-row' }, [el('div', { className: 'record-main' }, [el('strong', { text: lead.name }), el('span', { text: lead.address || [lead.city, lead.state].filter(Boolean).join(' / ') || 'Endereço não informado' }), lead.phone ? el('span', { text: `Telefone: ${lead.phone}` }) : null, lead.email ? el('span', { text: `E-mail: ${lead.email}` }) : null]), el('div', { className: 'record-secondary' }, [el('span', { className: 'status', text: lead.status_label || 'NOVO' }), el('div', { className: 'form-actions' }, actions)])]));
             });
         }
         form.addEventListener('submit', async (event) => {
-            event.preventDefault();
-            if (submit.disabled) return;
+            event.preventDefault(); if (submit.disabled) return;
             setButtonBusy(submit, true, 'Buscando...'); message.className = 'form-message'; message.textContent = '';
             try {
-                const result = await api('master_prospect_search', { method: 'POST', body: { state: stateInput.value.trim(), city: cityInput.value.trim(), term: termInput.value.trim() } });
-                renderLeads(Array.isArray(result.leads) ? result.leads : []);
-                message.className = 'form-message success'; message.textContent = 'Busca concluída. Escolha um canal para iniciar o contato.';
+                const result = await api('master_prospect_search', { method: 'POST', body: { state: stateSelect.value, city: '', term: termInput.value.trim() } });
+                renderLeads(Array.isArray(result.leads) ? result.leads : []); message.className = 'form-message success'; message.textContent = 'Busca concluída. Escolha um canal para iniciar o contato.';
             } catch (error) {
-                message.className = 'form-message error'; message.textContent = friendlyError(error);
+                const messages = { prospecting_not_configured: 'A prospecção ainda não está configurada no servidor. Verifique as chaves dos buscadores.', prospecting_search_failed: 'O buscador não respondeu. Tente novamente em alguns minutos.', prospecting_ai_failed: 'A busca encontrou dados, mas a organização dos contatos falhou. Tente novamente.' };
+                message.className = 'form-message error'; message.textContent = messages[error.code] || friendlyError(error);
             } finally { setButtonBusy(submit, false); }
         });
-        section.append(form, list);
-        return section;
+        section.append(form, list); return section;
     }
 
     async function renderPlatformPage(content) {
