@@ -888,7 +888,19 @@ function apiRequirePlatformAdmin(array $user): void
         apiError('forbidden', 403);
     }
 }
-
+function apiProspectFilters(mixed $input): array
+{
+    $input = is_array($input) ? $input : [];
+    $state = strtoupper(apiProspectText($input['state'] ?? '', 2));
+    if (!preg_match('/^[A-Z]{2}$/', $state)) {
+        $state = '';
+    }
+    return [
+        'state' => $state,
+        'city' => apiProspectText($input['city'] ?? '', 120),
+        'term' => apiProspectText($input['term'] ?? '', 160),
+    ];
+}
 function apiProspectConfig(): array
 {
     $path = __DIR__ . '/prospeccao/config.local.php';
