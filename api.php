@@ -1771,9 +1771,13 @@ function runApi(): never
             handleHistory($pdo, $prefix, $user);
         }
         apiError('not_found', 404);
-    } catch (Throwable) {
+    } catch (Throwable $exception) {
         if ($pdo instanceof PDO && $pdo->inTransaction()) {
             $pdo->rollBack();
+        }
+        if (in_array((string)($_GET['action'] ?? ''), ['master_prospect_search', 'master_prospect_leads'], true)) {
+            error_log('Barbershop prospecting runtime error: ' . get_class($exception) . ': ' . $exception->getMessage());
+            apiError('prospecting_runtime_error', 500);
         }
         // Never return driver messages, SQL, credentials, or stack traces to clients.
         apiError('internal_error', 500);
