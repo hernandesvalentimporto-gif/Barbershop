@@ -233,6 +233,12 @@ export const api = {
   masterBilling(barbershopId: number, status: "paid" | "pending") {
     return request<{ barbershop_id: number; status: string }>("master_billing", { method: "POST", body: { barbershop_id: barbershopId, status } });
   },
+  masterProspectSearch(filters: import("./types").MasterProspectFilters) {
+    return request<import("./types").MasterProspectSearchResponse>("master_prospect_search", { method: "POST", body: filters });
+  },
+  masterProspectLeads(filters: import("./types").MasterProspectFilters = {}) {
+    return request<import("./types").MasterProspectLeadsResponse>("master_prospect_leads", { query: filters });
+  },
   services() {
     return request<ServiceListResponse>("services");
   },

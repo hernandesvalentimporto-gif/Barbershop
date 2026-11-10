@@ -105,3 +105,19 @@ export type MasterShop = {
   id: number; name: string; monthly_amount_cents: number; payment_status: "paid" | "pending"; due_date: string; paid_at?: string | null; clients_count: number; barbers_count: number;
 };
 export type MasterDashboardResponse = { shops: MasterShop[]; plan_monthly_cents: number; totals: { shops: number; paid: number; pending: number } };
+
+export type MasterProspectFilters = { state?: string; city?: string; term?: string };
+export type MasterProspectLead = {
+  id?: number | string;
+  name: string;
+  phone?: string | null;
+  website?: string | null;
+  email?: string | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  status?: string | null;
+  status_label?: string | null;
+};
+export type MasterProspectSearchResponse = { leads?: MasterProspectLead[]; search_id?: string | number };
+export type MasterProspectLeadsResponse = { leads: MasterProspectLead[] };

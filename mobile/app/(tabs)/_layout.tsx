@@ -51,6 +51,7 @@ export default function TabLayout() {
       }}
     >
       <Tabs.Screen name="master" options={{ title: "Master", href: isPlatformAdmin ? "/master" : null, tabBarIcon: ({ color, size }) => <Icon name="briefcase" color={color} size={size} /> }} />
+      <Tabs.Screen name="prospecting" options={{ title: "Prospecção", href: isPlatformAdmin ? "/prospecting" : null, tabBarIcon: ({ color, size }) => <Icon name="search" color={color} size={size} /> }} />
       <Tabs.Screen name="index" options={{ title: "Início", tabBarIcon: ({ color, size }) => <Icon name="home" color={color} size={size} /> }} />
       <Tabs.Screen name="booking" options={{ title: "Agendar", href: isClient ? "/booking" : null, tabBarIcon: ({ color, size }) => <Icon name="calendar" color={color} size={size} /> }} />
       <Tabs.Screen name="history" options={{ title: "Histórico", href: isClient ? "/history" : null, tabBarIcon: ({ color, size }) => <Icon name="clock" color={color} size={size} /> }} />
