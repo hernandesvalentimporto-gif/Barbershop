@@ -1032,6 +1032,9 @@ function handleMasterProspectSearch(PDO $pdo, string $prefix, array $user): neve
     }
     // Conservative fallback: save only page titles and URLs, never guessed contacts.
     if (!$businesses) foreach ($docs as $id => $doc) { $name = apiProspectFallbackName($doc['title']); if ($name !== '') $businesses[] = ['evidence_id' => $id, 'company_name' => $name, 'website' => $doc['url'], 'source_url' => $doc['url']]; }
+    // Tavily/Extract/OpenRouter podem demorar mais que o wait_timeout do MySQL.
+    // Reabre a conexão antes da gravação para não usar um PDO stale.
+    [$pdo, $prefix] = database();
     $insert = $pdo->prepare("INSERT INTO `{$prefix}prospect_leads` (fingerprint,name,phone,email,website,address,city,state,source_url) VALUES (?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE name=VALUES(name),phone=COALESCE(VALUES(phone),phone),email=COALESCE(VALUES(email),email),website=COALESCE(VALUES(website),website),address=COALESCE(VALUES(address),address),city=COALESCE(VALUES(city),city),state=COALESCE(VALUES(state),state),source_url=COALESCE(VALUES(source_url),source_url),updated_at=CURRENT_TIMESTAMP");
     $count = 0;
     foreach (array_slice($businesses, 0, 15) as $business) {
