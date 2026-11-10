@@ -1010,7 +1010,9 @@ function handleMasterProspectSearch(PDO $pdo, string $prefix, array $user): neve
         $email = isset($emailMatch[0]) && filter_var($emailMatch[0], FILTER_VALIDATE_EMAIL) ? strtolower($emailMatch[0]) : null;
         $phone = isset($phoneMatch[0]) ? apiProspectText($phoneMatch[0], 40) : null;
         $fingerprint = hash('sha256', strtolower(trim($name . '||' . $doc['url'])));
-        $insert->execute([$fingerprint, $name, $phone, $email, $doc['url'], null, null, $filters['state'] ?: null, $doc['url']]);
+        $website = apiProspectText($doc['url'], 500);
+        $sourceUrl = apiProspectText($doc['url'], 700);
+        $insert->execute([$fingerprint, $name, $phone, $email, $website, null, null, $filters['state'] ?: null, $sourceUrl]);
         $count++;
     }
     $run = $pdo->prepare("INSERT INTO `{$prefix}prospect_search_runs` (query_text,state,city,result_count,status) VALUES (?,?,?,?, 'completed')");
