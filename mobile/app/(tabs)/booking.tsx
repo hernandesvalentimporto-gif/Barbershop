@@ -185,7 +185,7 @@ export default function BookingScreen() {
 
   return (
     <Screen>
-      <Header title="Agendar" subtitle="Escolha o serviço, profissional e melhor horário." />
+      <Header title="Agendar" subtitle="Escolha o serviço, profissional e melhor horário." right={<Button variant="ghost" icon="refresh-cw" onPress={() => void loadCatalog()}>Atualizar</Button>} />
       {catalogLoading ? <LoadingState label="Carregando catálogo..." /> : null}
       {!catalogLoading && catalogError ? <ErrorState message={catalogError} onRetry={() => void loadCatalog()} /> : null}
       {!catalogLoading && catalog ? (
