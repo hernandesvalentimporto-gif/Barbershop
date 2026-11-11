@@ -1,4 +1,4 @@
-name: Gerar APK Android de teste
+name: Gerar e publicar APK Android
 
 on:
   push:
@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: android-apk-${{ github.ref }}
@@ -69,14 +69,14 @@ jobs:
       - name: Conferir assinatura e guardar candidato
         run: |
           mkdir -p ../build-artifacts
-          cp android/app/build/outputs/apk/release/app-release.apk ../build-artifacts/BarberShop-SistemasHP-Teste-v3.apk
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs ../build-artifacts/BarberShop-SistemasHP-Teste-v3.apk
-          (cd ../build-artifacts && sha256sum BarberShop-SistemasHP-Teste-v3.apk > SHA256SUMS.txt)
-          printf '%s\n' 'APK de teste 1.0.3, com buscas compactas de clientes, serviços e barbeiros e horários ocupados desabilitados. ARM64 e x86_64, assinatura de desenvolvimento Expo. Sem publicação em lojas; o teste de abertura em emulador não substitui a validação completa no celular.' > ../build-artifacts/LEIA-ME.txt
+          cp android/app/build/outputs/apk/release/app-release.apk ../build-artifacts/BarberShop-SistemasHP-Teste-v15.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs ../build-artifacts/BarberShop-SistemasHP-Teste-v15.apk
+          (cd ../build-artifacts && sha256sum BarberShop-SistemasHP-Teste-v15.apk > SHA256SUMS.txt)
+          printf '%s\n' 'Barber Shop Sistemas HP para Android 1.0.15: busca compacta de clientes, serviços e barbeiros, com horários ocupados desabilitados. ARM64 e x86_64. Assinatura de desenvolvimento Expo. Validado por instalação, abertura, tela Entrar e reabertura em emulador, sem login ou chamadas em produção. Instalação manual; sem publicação em lojas.' > ../build-artifacts/LEIA-ME.txt
       - name: Transferir candidato para a máquina de testes
         uses: actions/upload-artifact@v4
         with:
-          name: BarberShop-SistemasHP-Candidato-v3
+          name: BarberShop-SistemasHP-Candidato-v15
           path: build-artifacts/
           if-no-files-found: error
           retention-days: 7
@@ -105,7 +105,7 @@ jobs:
       - name: Baixar o APK candidato
         uses: actions/download-artifact@v4
         with:
-          name: BarberShop-SistemasHP-Candidato-v3
+          name: BarberShop-SistemasHP-Candidato-v15
           path: build-artifacts
       - name: Liberar disco dos toolchains que este teste não utiliza
         run: |
@@ -123,16 +123,27 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_7_pro
-          ram-size: 2048M
+          ram-size: 3072M
           disk-size: 2048M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
           working-directory: mobile
-          script: bash scripts/android-startup-smoke.sh ../build-artifacts/BarberShop-SistemasHP-Teste-v3.apk
+          script: bash scripts/android-startup-smoke.sh ../build-artifacts/BarberShop-SistemasHP-Teste-v15.apk
+      - name: Publicar APK no release para o link existente do site
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp build-artifacts/BarberShop-SistemasHP-Teste-v15.apk build-artifacts/Barbershop-SistemasHP.apk
+          (cd build-artifacts && sha256sum Barbershop-SistemasHP.apk > SHA256SUMS-release.txt)
+          gh release create v1.0.15 build-artifacts/Barbershop-SistemasHP.apk \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title 'Barbershop 1.0.15' \
+            --notes-file build-artifacts/LEIA-ME.txt
       - name: Disponibilizar APK após o teste de abertura
         uses: actions/upload-artifact@v4
         with:
-          name: BarberShop-SistemasHP-APK-Teste-v3
+          name: BarberShop-SistemasHP-APK-Teste-v15
           path: build-artifacts/
           if-no-files-found: error
           retention-days: 30
