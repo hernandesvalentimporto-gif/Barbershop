@@ -212,6 +212,12 @@ img { display: block; max-width: 100%; }
 .price-reference { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
 .price-reference label { color: var(--muted); font-size: 12px; }
 .price-reference select { min-height: 34px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--surface-2); font-size: 12px; }
+.price-reference-list { display: grid; gap: 8px; }
+.price-reference-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line-soft); }
+.price-reference-main { display: grid; gap: 2px; min-width: 0; }
+.price-reference-main small { color: var(--muted-2); font-size: 11px; }
+.price-reference-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.default-price-table h4 { margin: 18px 0 4px; color: var(--gold-bright); }
 .service-price { color: var(--gold-bright); font-weight: 800; }
 .service-description { margin: 10px 0 0; color: var(--muted); font-size: 13px; white-space: pre-wrap; }
 
@@ -299,6 +305,8 @@ img { display: block; max-width: 100%; }
     .record-card { align-items: flex-start; flex-direction: column; }
     .record-row { grid-template-columns: 1fr; }
     .record-secondary { justify-content: flex-start; }
+    .price-reference-row { grid-template-columns: minmax(0, 1fr) auto; }
+    .price-reference-actions { grid-column: 1 / -1; justify-content: flex-start; }
     .shop-detail-grid { grid-template-columns: 1fr; padding: 15px; }
     .date-toolbar strong { min-width: auto; order: -1; width: 100%; text-align: left; }
     .date-toolbar { width: 100%; }

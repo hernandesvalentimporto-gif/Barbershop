@@ -1681,22 +1681,43 @@
         clear(content);
         const admin = state.user.role === 'admin';
         content.append(pageIntro('Serviços', admin ? 'Cadastre ou edite serviços sem inserir valores ou durações automaticamente.' : 'Serviços ativos disponíveis para agendamento.'));
-        content.append(defaultPriceTable(admin));
+        content.append(defaultPriceTable(admin, services, content));
         renderServicesContent(content, services, admin);
     }
 
-    function defaultPriceTable(admin) {
+    function defaultPriceTable(admin, catalogServices, content) {
         const services = serviceReferences.filter(([name]) => !name.startsWith('Corte +') && !name.startsWith('Pacote VIP'));
         const combos = serviceReferences.filter(([name]) => name.startsWith('Corte +') || name.startsWith('Pacote VIP'));
+        const catalogByName = new Map((catalogServices || []).map((item) => [item.name, item]));
+        const row = ([name, referenceCents]) => {
+            const current = catalogByName.get(name);
+            const cents = current ? Number(current.price_cents) : referenceCents;
+            const controls = admin ? [
+                button(current ? 'Editar' : 'Cadastrar', 'button ghost small', () => {
+                    state.editingService = current || null;
+                    state.referenceService = current ? null : { name, price_cents: referenceCents };
+                    renderServicesContent(content, catalogServices || [], true);
+                    content.querySelector('.form-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }),
+                current ? button(Number(current.active) === 1 ? 'Inativar' : 'Ativar', 'button secondary small', async () => {
+                    await api('service_save', { method: 'POST', body: { id: Number(current.id), name: current.name, duration_minutes: Number(current.duration_minutes), price_cents: Number(current.price_cents), active: Number(current.active) === 1 ? 0 : 1, description: current.description || '' } });
+                    showToast(Number(current.active) === 1 ? 'Serviço inativado.' : 'Serviço ativado.');
+                    renderApp();
+                }) : null
+            ].filter(Boolean) : [];
+            return el('div', { className: 'price-reference-row' }, [
+                el('div', { className: 'price-reference-main' }, [el('span', { text: name }), current ? el('small', { text: `${current.duration_minutes} min · ${Number(current.active) === 1 ? 'Ativo' : 'Inativo'}` }) : el('small', { text: 'Padrão ainda não cadastrado' })]),
+                el('strong', { text: formatBRL(cents) }),
+                controls.length ? el('div', { className: 'price-reference-actions' }, controls) : null
+            ]);
+        };
         const group = (title, items) => el('div', { className: 'price-reference-group' }, [
             el('h4', { text: title }),
-            el('div', { className: 'price-reference-list' }, items.map(([name, cents]) => el('div', { className: 'price-reference-row' }, [
-                el('span', { text: name }), el('strong', { text: formatBRL(cents) })
-            ])))
+            el('div', { className: 'price-reference-list' }, items.map(row))
         ]);
         return el('section', { className: 'card section-card default-price-table' }, [
-            el('h3', { text: 'Tabela de preços padrão da barbearia' }),
-            el('p', { className: 'section-description', text: admin ? 'Use estes valores como padrão e altere ou inative qualquer item no catálogo. A duração precisa ser confirmada antes de ativar para agendamento.' : 'Valores padrão informados pela barbearia.' }),
+            el('h3', { text: 'Tabela de preços da barbearia' }),
+            el('p', { className: 'section-description', text: admin ? 'Cada linha está ligada ao cadastro real. Edite preço e duração, ou ative/inative o item para controlar a agenda.' : 'Valores atuais cadastrados pela barbearia.' }),
             group('Serviços', services), group('Combos promocionais', combos)
         ]);
     }
@@ -1722,6 +1743,7 @@
                 try {
                     await api('service_save', { method: 'POST', body: collectServicePayload(form, editing) });
                     state.editingService = null;
+                    state.referenceService = null;
                     showToast(editing ? 'Serviço atualizado.' : 'Serviço criado.');
                     const fresh = await api('services');
                     renderServicesContent(content, fresh.services || [], true);
@@ -1737,19 +1759,20 @@
 
     function serviceForm(editing, onSubmit) {
         const form = el('form', { className: 'card form-card', novalidate: true });
-        const name = input('text', 'service-name-input', editing ? editing.name : '', { required: true, maxlength: 140, placeholder: 'Nome do serviço' });
-        const duration = input('number', 'service-duration-input', editing ? editing.duration_minutes : '', { required: true, min: 5, max: 480, step: 1, placeholder: '5 a 480' });
-        const price = input('text', 'service-price-input', editing ? formatBRLInput(editing.price_cents) : '', { required: true, inputmode: 'decimal', placeholder: '0,00' });
+        const template = editing || state.referenceService;
+        const name = input('text', 'service-name-input', template ? template.name : '', { required: true, maxlength: 140, placeholder: 'Nome do serviço' });
+        const duration = input('number', 'service-duration-input', template && template.duration_minutes ? template.duration_minutes : '', { required: true, min: 5, max: 480, step: 1, placeholder: '5 a 480' });
+        const price = input('text', 'service-price-input', template ? formatBRLInput(template.price_cents) : '', { required: true, inputmode: 'decimal', placeholder: '0,00' });
         const active = el('input', { type: 'checkbox', id: 'service-active-input', checked: editing ? Number(editing.active) === 1 : true });
         const description = el('textarea', { id: 'service-description-input', maxlength: 5000, placeholder: 'Descrição opcional' });
-        if (editing && editing.description) description.value = editing.description;
+        if (template && template.description) description.value = template.description;
         const reference = selectInput('service-reference-input');
         addSelectOptions(reference, serviceReferences.map(([label, cents]) => ({ id: cents, name: `${label} — ${formatBRL(cents)}` })), 'Usar uma referência de preço (opcional)');
         const message = el('p', { className: 'form-message', role: 'alert', 'aria-live': 'polite' });
         const submit = button(editing ? 'Salvar alterações' : 'Cadastrar serviço', 'button');
         submit.type = 'submit';
         reference.addEventListener('change', () => { if (reference.value) price.value = formatBRLInput(Number(reference.value)); });
-        form.append(el('h3', { text: editing ? 'Editar serviço' : 'Novo serviço' }), el('p', { text: 'A duração é obrigatória e nenhum serviço é criado automaticamente.' }), el('div', { className: 'form-grid' }, [field('Nome', name), field('Duração em minutos', duration, 'Entre 5 e 480 minutos.'), el('div', { className: 'field' }, [el('label', { htmlFor: price.id, text: 'Valor' }), price, el('div', { className: 'price-reference' }, [el('label', { htmlFor: reference.id, text: 'Referência opcional:' }), reference])]), el('div', { className: 'field' }, [el('span', { className: 'field-label', text: 'Disponibilidade' }), el('div', { className: 'checkbox-field' }, [active, el('label', { htmlFor: active.id, text: 'Serviço ativo para agendamento' })])]), field('Descrição', description)]), message, el('div', { className: 'form-actions' }, [submit, editing ? button('Cancelar edição', 'button secondary', () => { state.editingService = null; renderApp(); }) : null]));
+        form.append(el('h3', { text: editing ? 'Editar serviço' : 'Novo serviço' }), el('p', { text: 'Informe a duração antes de ativar o item para agendamento.' }), el('div', { className: 'form-grid' }, [field('Nome', name), field('Duração em minutos', duration, 'Entre 5 e 480 minutos.'), el('div', { className: 'field' }, [el('label', { htmlFor: price.id, text: 'Valor' }), price, el('div', { className: 'price-reference' }, [el('label', { htmlFor: reference.id, text: 'Referência opcional:' }), reference])]), el('div', { className: 'field' }, [el('span', { className: 'field-label', text: 'Disponibilidade' }), el('div', { className: 'checkbox-field' }, [active, el('label', { htmlFor: active.id, text: 'Serviço ativo para agendamento' })])]), field('Descrição', description)]), message, el('div', { className: 'form-actions' }, [submit, editing ? button('Cancelar edição', 'button secondary', () => { state.editingService = null; renderApp(); }) : null]));
         form.addEventListener('submit', async (event) => {
             event.preventDefault();
             if (!form.reportValidity() || submit.disabled) return;
