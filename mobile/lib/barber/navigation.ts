@@ -5,16 +5,26 @@ export function tabAccessRedirect(
   route: string | undefined,
   role: BarberRole | null,
   authReady: boolean,
+  platformAdmin = false,
 ): "/" | null {
   if (!authReady) return null;
-  const clientRoute = route === "booking" || route === "history";
+  const clientRoute = route === "history";
+  const bookingRoute = route === "booking";
   const staffRoute = route === "agenda";
-  const adminRoute = route === "clients" || route === "services";
-  const protectedRoute = clientRoute || staffRoute || adminRoute || route === "more";
+  const clientsRoute = route === "clients";
+  const servicesRoute = route === "services";
+  const masterRoute = route === "master";
+  const prospectingRoute = route === "prospecting";
+  const protectedRoute = clientRoute || bookingRoute || staffRoute || clientsRoute || servicesRoute || masterRoute || prospectingRoute || route === "more";
   if (!protectedRoute) return null;
   if (!role) return "/";
+  if (platformAdmin && (bookingRoute || staffRoute || clientsRoute || servicesRoute)) return "/";
+  if (masterRoute && !platformAdmin) return "/";
+  if (prospectingRoute && !platformAdmin) return "/";
   if (clientRoute && role !== "client") return "/";
+  if (bookingRoute && role !== "client" && role !== "barber" && role !== "admin") return "/";
   if (staffRoute && role !== "barber" && role !== "admin") return "/";
-  if (adminRoute && role !== "admin") return "/";
+  if (clientsRoute && role !== "barber" && role !== "admin") return "/";
+  if (servicesRoute && role !== "admin") return "/";
   return null;
 }

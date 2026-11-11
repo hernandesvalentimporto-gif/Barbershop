@@ -1,7 +1,8 @@
 import Feather from "@expo/vector-icons/Feather";
-import React from "react";
+import React, { useState } from "react";
 import {
   ActivityIndicator,
+  FlatList,
   Image,
   KeyboardAvoidingView,
   Modal,
@@ -17,19 +18,20 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { filterSearchableItems } from "@/lib/barber/search";
 import { statusLabel } from "@/lib/barber/utils";
 
 export const BARBER_COLORS = {
-  background: "#080808",
-  card: "#181816",
-  cardAlt: "#11110f",
-  border: "#5A4820",
+  background: "#090A0C",
+  card: "#15171A",
+  cardAlt: "#111316",
+  border: "#303338",
   gold: "#E7B94E",
-  goldMuted: "#A98A3A",
-  text: "#FFFFFF",
-  textMuted: "#B9B4A8",
-  danger: "#F07A68",
-  success: "#75C99A",
+  goldMuted: "#9D7620",
+  text: "#F7F2E8",
+  textMuted: "#A8A49B",
+  danger: "#EE8585",
+  success: "#68CB9B",
 };
 
 export function Screen({
@@ -83,6 +85,7 @@ export function BrandHeader({ subtitle, compact = false }: { subtitle?: string; 
 export function Header({ title, subtitle, right }: { title: string; subtitle?: string; right?: React.ReactNode }) {
   return (
     <View style={styles.header}>
+      <Image source={require("@/assets/images/barber-logo.png")} style={styles.headerLogo} resizeMode="contain" accessibilityLabel="Logo Barber Shop Sistemas HP" />
       <View style={styles.headerCopy}>
         <Text style={styles.eyebrow}>SISTEMAS HP</Text>
         <Text style={styles.title}>{title}</Text>
@@ -106,7 +109,7 @@ export function Button({
   icon,
   style,
 }: {
-  children: React.ReactNode;
+  children?: React.ReactNode;
   onPress?: () => void;
   variant?: "primary" | "secondary" | "danger" | "ghost";
   disabled?: boolean;
@@ -141,13 +144,155 @@ export function Button({
 export function Field({ label, error, ...props }: TextInputProps & { label: string; error?: string }) {
   return (
     <View style={styles.fieldWrap}>
-      <Text style={styles.label}>{label}</Text>
+      {label ? <Text style={styles.label}>{label}</Text> : null}
       <TextInput
         {...props}
         placeholderTextColor={BARBER_COLORS.textMuted}
         style={[styles.input, props.multiline && styles.inputMultiline, props.style]}
       />
       {error ? <Text style={styles.fieldError}>{error}</Text> : null}
+    </View>
+  );
+}
+
+export type SearchablePickerOption = {
+  id: string;
+  label: string;
+  description?: string | null;
+  keywords?: string | null;
+};
+
+export function SearchablePicker({
+  label,
+  title,
+  placeholder,
+  searchPlaceholder,
+  selectedSummary,
+  selectedIds,
+  options,
+  onSelectionChange,
+  multiple = false,
+  disabled = false,
+  emptyText = "Nenhum resultado encontrado.",
+}: {
+  label: string;
+  title: string;
+  placeholder: string;
+  searchPlaceholder: string;
+  selectedSummary?: string;
+  selectedIds: string[];
+  options: SearchablePickerOption[];
+  onSelectionChange: (ids: string[]) => void;
+  multiple?: boolean;
+  disabled?: boolean;
+  emptyText?: string;
+}) {
+  const [visible, setVisible] = useState(false);
+  const [query, setQuery] = useState("");
+  const filteredOptions = filterSearchableItems(options, query);
+
+  function close() {
+    setVisible(false);
+    setQuery("");
+  }
+
+  function choose(option: SearchablePickerOption) {
+    if (multiple) {
+      onSelectionChange(
+        selectedIds.includes(option.id)
+          ? selectedIds.filter((id) => id !== option.id)
+          : [...selectedIds, option.id],
+      );
+      return;
+    }
+    onSelectionChange([option.id]);
+    close();
+  }
+
+  return (
+    <View style={styles.fieldWrap}>
+      <Text style={styles.label}>{label}</Text>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ disabled }}
+        disabled={disabled}
+        onPress={() => { setQuery(""); setVisible(true); }}
+        style={({ pressed }) => [styles.pickerTrigger, disabled && styles.buttonDisabled, pressed && styles.pressed]}
+      >
+        <Text numberOfLines={2} style={[styles.pickerTriggerText, !selectedSummary && styles.pickerPlaceholder]}>
+          {selectedSummary || placeholder}
+        </Text>
+        <Feather name="search" size={19} color={BARBER_COLORS.gold} />
+      </Pressable>
+      <Modal visible={visible} transparent animationType="slide" onRequestClose={close}>
+        <View style={styles.pickerBackdrop}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Fechar pesquisa"
+            onPress={close}
+            style={StyleSheet.absoluteFill}
+          />
+          <SafeAreaView style={styles.pickerSheet} edges={["bottom"]}>
+            <View style={styles.pickerHeader}>
+              <View style={{ flex: 1, gap: 3 }}>
+                <Text style={styles.sectionTitle}>{title}</Text>
+                <Text style={styles.muted}>{multiple ? "Marque uma ou mais opções." : "Pesquise e toque em uma opção."}</Text>
+              </View>
+              <Pressable accessibilityRole="button" accessibilityLabel="Fechar" onPress={close} style={styles.pickerClose}>
+                <Feather name="x" size={21} color={BARBER_COLORS.text} />
+              </Pressable>
+            </View>
+            <TextInput
+              autoCapitalize="none"
+              autoCorrect={false}
+              onChangeText={setQuery}
+              placeholder={searchPlaceholder}
+              placeholderTextColor={BARBER_COLORS.textMuted}
+              returnKeyType="search"
+              style={styles.input}
+              value={query}
+            />
+            <Text style={styles.pickerResultCount} accessibilityLiveRegion="polite">
+              {filteredOptions.length} {filteredOptions.length === 1 ? "resultado" : "resultados"}
+              {multiple && selectedIds.length ? ` · ${selectedIds.length} selecionado(s)` : ""}
+            </Text>
+            <FlatList
+              data={filteredOptions}
+              keyExtractor={(item) => item.id}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              style={styles.pickerList}
+              contentContainerStyle={filteredOptions.length ? styles.pickerListContent : styles.pickerEmptyContent}
+              renderItem={({ item }) => {
+                const selected = selectedIds.includes(item.id);
+                return (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    onPress={() => choose(item)}
+                    style={({ pressed }) => [styles.pickerOption, selected && styles.pickerOptionSelected, pressed && styles.pressed]}
+                  >
+                    <View style={styles.pickerOptionCopy}>
+                      <Text numberOfLines={1} style={styles.pickerOptionLabel}>{item.label}</Text>
+                      {item.description ? <Text numberOfLines={1} style={styles.pickerOptionDescription}>{item.description}</Text> : null}
+                    </View>
+                    <Feather
+                      name={multiple ? (selected ? "check-square" : "square") : (selected ? "check-circle" : "circle")}
+                      size={19}
+                      color={selected ? BARBER_COLORS.gold : BARBER_COLORS.textMuted}
+                    />
+                  </Pressable>
+                );
+              }}
+              ListEmptyComponent={<Text style={styles.pickerEmptyText}>{query ? "Nenhum item corresponde à busca." : emptyText}</Text>}
+            />
+            <View style={styles.pickerFooter}>
+              {multiple ? <Text style={styles.muted}>{selectedIds.length} serviço(s) selecionado(s)</Text> : <View />}
+              <Button variant="secondary" onPress={close}>{multiple ? "Concluir" : "Fechar"}</Button>
+            </View>
+          </SafeAreaView>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -247,32 +392,51 @@ export function ConfirmModal({ visible, title, message, confirmLabel = "Confirma
 export const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: BARBER_COLORS.background },
   flex: { flex: 1 },
-  scrollContent: { padding: 20, paddingBottom: 36, gap: 16 },
-  brandHeader: { alignItems: "center", gap: 9, paddingTop: 12, paddingBottom: 24 },
+  scrollContent: { padding: 17, paddingBottom: 100, gap: 16 },
+  brandHeader: { alignItems: "center", gap: 9, paddingTop: 10, paddingBottom: 20 },
   brandHeaderCompact: { paddingTop: 0, paddingBottom: 8 },
-  logo: { width: 170, height: 120 },
+  logo: { width: 250, height: 232 },
   logoSmall: { width: 95, height: 68 },
   brandSubtitle: { color: BARBER_COLORS.textMuted, fontSize: 13, letterSpacing: 1.2, textTransform: "uppercase" },
-  header: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12 },
-  headerCopy: { flex: 1, gap: 4 },
-  eyebrow: { color: BARBER_COLORS.gold, fontSize: 11, fontWeight: "700", letterSpacing: 1.5 },
-  title: { color: BARBER_COLORS.text, fontSize: 27, fontWeight: "800" },
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 9 },
+  headerLogo: { width: 62, height: 58, flexShrink: 0 },
+  headerCopy: { flex: 1, minWidth: 0, gap: 4 },
+  eyebrow: { color: BARBER_COLORS.gold, fontSize: 11, fontWeight: "800", letterSpacing: 2.4 },
+  title: { color: BARBER_COLORS.text, fontSize: 27, fontWeight: "800", letterSpacing: -0.9 },
   subtitle: { color: BARBER_COLORS.textMuted, fontSize: 14, lineHeight: 20 },
-  card: { backgroundColor: BARBER_COLORS.card, borderColor: BARBER_COLORS.border, borderWidth: 1, borderRadius: 16, padding: 16, gap: 12 },
-  button: { minHeight: 48, borderRadius: 12, paddingHorizontal: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 9 },
+  card: { backgroundColor: BARBER_COLORS.card, borderColor: "#25282D", borderWidth: 1, borderRadius: 16, padding: 18, gap: 12 },
+  button: { minHeight: 42, borderRadius: 10, paddingHorizontal: 15, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
   buttonPrimary: { backgroundColor: BARBER_COLORS.gold },
-  buttonSecondary: { backgroundColor: "transparent", borderColor: BARBER_COLORS.gold, borderWidth: 1 },
-  buttonDanger: { backgroundColor: "transparent", borderColor: BARBER_COLORS.danger, borderWidth: 1 },
-  buttonGhost: { backgroundColor: "transparent", paddingHorizontal: 12 },
+  buttonSecondary: { backgroundColor: "#22252A", borderColor: BARBER_COLORS.border, borderWidth: 1 },
+  buttonDanger: { backgroundColor: "rgba(137, 44, 44, .22)", borderColor: "rgba(238, 133, 133, .35)", borderWidth: 1 },
+  buttonGhost: { backgroundColor: "transparent", borderColor: "rgba(231, 185, 78, .42)", borderWidth: 1, paddingHorizontal: 12 },
   buttonDisabled: { opacity: 0.45 },
   pressed: { opacity: 0.72 },
   buttonText: { fontSize: 15, fontWeight: "800" },
   fieldWrap: { gap: 7 },
   label: { color: BARBER_COLORS.text, fontSize: 13, fontWeight: "700" },
-  input: { minHeight: 50, borderRadius: 10, borderWidth: 1, borderColor: BARBER_COLORS.border, backgroundColor: BARBER_COLORS.cardAlt, color: BARBER_COLORS.text, paddingHorizontal: 14, fontSize: 16 },
+  input: { minHeight: 43, borderRadius: 9, borderWidth: 1, borderColor: BARBER_COLORS.border, backgroundColor: BARBER_COLORS.cardAlt, color: BARBER_COLORS.text, paddingHorizontal: 12, fontSize: 16 },
   inputMultiline: { minHeight: 90, paddingTop: 13, textAlignVertical: "top" },
   fieldError: { color: BARBER_COLORS.danger, fontSize: 12 },
-  chip: { minHeight: 44, borderRadius: 10, borderWidth: 1, borderColor: BARBER_COLORS.border, paddingHorizontal: 14, justifyContent: "center", backgroundColor: BARBER_COLORS.cardAlt },
+  pickerTrigger: { minHeight: 52, borderRadius: 10, borderWidth: 1, borderColor: BARBER_COLORS.border, backgroundColor: BARBER_COLORS.cardAlt, paddingHorizontal: 13, flexDirection: "row", alignItems: "center", gap: 12 },
+  pickerTriggerText: { flex: 1, color: BARBER_COLORS.text, fontSize: 15, fontWeight: "700" },
+  pickerPlaceholder: { color: BARBER_COLORS.textMuted, fontWeight: "500" },
+  pickerBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.72)" },
+  pickerSheet: { height: "86%", maxHeight: "90%", paddingHorizontal: 17, paddingTop: 18, paddingBottom: 10, gap: 11, backgroundColor: BARBER_COLORS.background, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1, borderColor: BARBER_COLORS.border },
+  pickerHeader: { flexDirection: "row", alignItems: "center", gap: 12 },
+  pickerClose: { width: 40, height: 40, borderRadius: 11, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: BARBER_COLORS.border, backgroundColor: BARBER_COLORS.card },
+  pickerResultCount: { color: BARBER_COLORS.textMuted, fontSize: 12, fontWeight: "700" },
+  pickerList: { flex: 1, minHeight: 0 },
+  pickerListContent: { gap: 8, paddingBottom: 8 },
+  pickerEmptyContent: { flexGrow: 1, justifyContent: "center" },
+  pickerEmptyText: { color: BARBER_COLORS.textMuted, fontSize: 14, textAlign: "center", padding: 20 },
+  pickerOption: { minHeight: 59, flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 13, paddingVertical: 8, borderWidth: 1, borderColor: BARBER_COLORS.border, borderRadius: 11, backgroundColor: BARBER_COLORS.card },
+  pickerOptionSelected: { borderColor: BARBER_COLORS.gold, backgroundColor: "#302712" },
+  pickerOptionCopy: { flex: 1, minWidth: 0, gap: 2 },
+  pickerOptionLabel: { color: BARBER_COLORS.text, fontSize: 15, fontWeight: "700" },
+  pickerOptionDescription: { color: BARBER_COLORS.textMuted, fontSize: 12 },
+  pickerFooter: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, paddingTop: 5 },
+  chip: { minHeight: 38, borderRadius: 11, borderWidth: 1, borderColor: BARBER_COLORS.border, paddingHorizontal: 13, justifyContent: "center", backgroundColor: "#1B1D21" },
   chipSelected: { borderColor: BARBER_COLORS.gold, backgroundColor: "#302712" },
   chipDisabled: { opacity: 0.4 },
   chipText: { color: BARBER_COLORS.textMuted, fontWeight: "700", fontSize: 14 },
@@ -283,7 +447,7 @@ export const styles = StyleSheet.create({
   dateWeekday: { color: BARBER_COLORS.textMuted, fontSize: 11, fontWeight: "700", textTransform: "uppercase" },
   dateDay: { color: BARBER_COLORS.text, fontSize: 18, fontWeight: "800" },
   dateTextSelected: { color: BARBER_COLORS.background },
-  sectionTitle: { color: BARBER_COLORS.text, fontSize: 17, fontWeight: "800" },
+  sectionTitle: { color: BARBER_COLORS.text, fontSize: 18, fontWeight: "800", letterSpacing: -0.3 },
   row: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
   wrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   muted: { color: BARBER_COLORS.textMuted, fontSize: 14, lineHeight: 20 },

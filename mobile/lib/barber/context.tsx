@@ -21,7 +21,7 @@ export type BarberContextValue = {
   authError: string | null;
   storageError: string | null;
   storageNotice: string | null;
-  login: (email: string, password: string) => Promise<void>;
+  login: (identifier: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   retryRestore: () => Promise<void>;
   retryStorageCleanup: () => Promise<void>;
@@ -41,8 +41,11 @@ function normalizeUser(value: any): BarberUser {
     id: Number(value.id),
     name: String(value.name ?? ""),
     email: String(value.email ?? ""),
+    phone: value.phone == null ? null : String(value.phone),
     role,
     status: value.status ?? "active",
+    platform_admin: Boolean(value.platform_admin),
+    barbershop_id: value.barbershop_id == null ? null : Number(value.barbershop_id),
   };
 }
 
@@ -224,7 +227,7 @@ export function BarberProvider({ children }: { children: React.ReactNode }) {
   }, [handleUnauthorized, hydrate]);
 
   const login = useCallback(
-    async (email: string, password: string) => {
+    async (identifier: string, password: string) => {
       const generation = ++sessionGenerationRef.current;
       setBusy(true);
       setAuthError(null);
@@ -234,7 +237,7 @@ export function BarberProvider({ children }: { children: React.ReactNode }) {
       updateToken(null);
       updateUser(null);
       try {
-        const result = await api.login(email.trim(), password);
+        const result = await api.login(identifier.trim(), password);
         const nextUser = normalizeUser(result.user);
         if (!result.token) throw new ApiError("O servidor não retornou um token de sessão.", { code: "invalid_token" });
         if (sessionGenerationRef.current !== generation) return;

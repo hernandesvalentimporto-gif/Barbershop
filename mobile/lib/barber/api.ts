@@ -1,6 +1,6 @@
 import type {
   AppointmentListResponse,
-  AvailabilitySlot,
+  AvailabilityResponse,
   BarberUser,
   Catalog,
   ClientHistoryAppointment,
@@ -172,10 +172,10 @@ export async function request<T>(
 }
 
 export const api = {
-  login(email: string, password: string) {
+  login(identifier: string, password: string) {
     return request<{ token: string; user: User; expires_in?: number }>("login", {
       method: "POST",
-      body: { email, password },
+      body: { identifier, password },
     });
   },
   me() {
@@ -187,14 +187,16 @@ export const api = {
   catalog() {
     return request<Catalog>("catalog");
   },
-  availability(date: string, barberId: number, serviceId: number) {
-    return request<{ slots: AvailabilitySlot[] }>("availability", {
-      query: { date, barber_id: barberId, service_id: serviceId },
+  availability(date: string, barberId: number, serviceIds: number[]) {
+    return request<AvailabilityResponse>("availability", {
+      query: { date, barber_id: barberId, service_ids: serviceIds.join(",") },
     });
   },
   appointmentCreate(input: {
+    client_id?: number;
     barber_id: number;
     service_id: number;
+    service_ids?: number[];
     starts_at: string;
     ends_at: string;
     notes?: string;
@@ -221,6 +223,21 @@ export const api = {
   },
   userSave(input: SaveUserInput) {
     return request<{ user: BarberUser }>("user_save", { method: "POST", body: input });
+  },
+  userDelete(userId: number) {
+    return request<{ deleted_user_id: number }>("user_delete", { method: "POST", body: { id: userId } });
+  },
+  masterDashboard() {
+    return request<import("./types").MasterDashboardResponse>("master_dashboard");
+  },
+  masterBilling(barbershopId: number, status: "paid" | "pending") {
+    return request<{ barbershop_id: number; status: string }>("master_billing", { method: "POST", body: { barbershop_id: barbershopId, status } });
+  },
+  masterProspectSearch(filters: import("./types").MasterProspectFilters) {
+    return request<import("./types").MasterProspectSearchResponse>("master_prospect_search", { method: "POST", body: filters });
+  },
+  masterProspectLeads(filters: import("./types").MasterProspectFilters = {}) {
+    return request<import("./types").MasterProspectLeadsResponse>("master_prospect_leads", { query: filters });
   },
   services() {
     return request<ServiceListResponse>("services");

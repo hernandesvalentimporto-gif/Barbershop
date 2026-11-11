@@ -1,6 +1,7 @@
 import Feather from "@expo/vector-icons/Feather";
 import React, { useEffect, useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Linking, Pressable, Text, View } from "react-native";
+import { Redirect, useRouter } from "expo-router";
 
 import { api } from "@/lib/barber/api";
 import { useBarber } from "@/lib/barber/context";
@@ -24,7 +25,7 @@ import {
 
 function LoginScreen() {
   const { login, busy, authError, storageError, retryStorageCleanup, clearAuthError } = useBarber();
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
@@ -32,8 +33,8 @@ function LoginScreen() {
   async function submit() {
     setValidation(null);
     clearAuthError();
-    if (!email.trim() || !email.includes("@")) {
-      setValidation("Informe um e-mail válido.");
+    if (!identifier.trim()) {
+      setValidation("Informe seu WhatsApp/telefone ou e-mail.");
       return;
     }
     if (!password) {
@@ -41,7 +42,7 @@ function LoginScreen() {
       return;
     }
     try {
-      await login(email, password);
+      await login(identifier, password);
     } catch {
       // The provider exposes the server/network message below the form.
     }
@@ -56,14 +57,14 @@ function LoginScreen() {
           <Text style={styles.subtitle}>Acesse sua conta para continuar.</Text>
         </View>
         <Field
-          label="E-mail"
-          value={email}
-          onChangeText={setEmail}
+          label="WhatsApp/telefone ou e-mail"
+          value={identifier}
+          onChangeText={setIdentifier}
           autoCapitalize="none"
           autoCorrect={false}
           keyboardType="email-address"
           textContentType="username"
-          placeholder="voce@email.com"
+          placeholder="(00) 00000-0000 ou e-mail"
           onFocus={clearAuthError}
         />
         <View style={{ gap: 7 }}>
@@ -83,7 +84,7 @@ function LoginScreen() {
               accessibilityRole="button"
               accessibilityLabel={showPassword ? "Ocultar senha" : "Mostrar senha"}
               onPress={() => setShowPassword((current) => !current)}
-              style={{ position: "absolute", right: 12, top: 12, minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center" }}
+              style={{ position: "absolute", right: 0, top: 0, width: 43, height: 43, alignItems: "center", justifyContent: "center" }}
             >
               <Feather name={showPassword ? "eye-off" : "eye"} size={20} color={BARBER_COLORS.gold} />
             </Pressable>
@@ -92,28 +93,37 @@ function LoginScreen() {
         {validation || authError ? <Notice tone="danger">{validation ?? authError}</Notice> : null}
         {storageError ? <Button variant="secondary" loading={busy} onPress={() => void retryStorageCleanup()}>Tentar limpar sessão</Button> : null}
         <Button onPress={submit} loading={busy} icon="log-in">Entrar</Button>
+        <Button variant="ghost" onPress={() => void Linking.openURL("https://github.com/hernandesvalentimporto-gif/Barbershop/releases/latest/download/BarberShop-SistemasHP-Teste-v2.apk")}>Baixar aplicativo para cliente</Button>
         <Notice>{WEB_STORAGE_WARNING}</Notice>
       </View>
     </Screen>
   );
 }
 
-function UpcomingCard({ appointment }: { appointment: Appointment }) {
+function UpcomingCard({ appointment, onOpenAgenda, onNewBooking }: { appointment: Appointment | null; onOpenAgenda: () => void; onNewBooking?: () => void }) {
   return (
     <Card>
       <View style={styles.row}>
-        <Text style={styles.sectionTitle}>Próximo atendimento</Text>
-        <StatusBadge status={appointment.status} />
+        <Text style={styles.sectionTitle}>{appointment ? "Próximo atendimento" : "Minha agenda"}</Text>
+        {appointment ? <StatusBadge status={appointment.status} /> : null}
       </View>
-      <Text style={styles.body}>{formatDateTime(appointment.starts_at)}</Text>
-      {appointment.service_name ? <Text style={styles.muted}>{appointment.service_name}</Text> : null}
-      {appointment.barber_name ? <Text style={styles.muted}>Com {appointment.barber_name}</Text> : null}
+      {appointment ? <>
+        <Text style={styles.body}>{formatDateTime(appointment.starts_at)}</Text>
+        {appointment.service_name ? <Text style={styles.muted}>{appointment.service_name}</Text> : null}
+        {appointment.barber_name ? <Text style={styles.muted}>Com {appointment.barber_name}</Text> : null}
+      </> : <Text style={styles.muted}>Você ainda não tem atendimento agendado.</Text>}
+      <View style={{ gap: 10, marginTop: 14 }}>
+        {onNewBooking ? <Button icon="plus" onPress={onNewBooking}>Novo agendamento</Button> : null}
+        <Button variant="secondary" icon="calendar" onPress={onOpenAgenda}>Abrir agenda completa</Button>
+      </View>
     </Card>
   );
 }
 
 function HomeScreen() {
   const { user } = useBarber();
+  const router = useRouter();
+  const isPlatformAdmin = Boolean(user?.platform_admin && !user?.barbershop_id);
   const [summary, setSummary] = useState<SummaryResponse["data"] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -132,9 +142,13 @@ function HomeScreen() {
   }
 
   useEffect(() => {
+    if (isPlatformAdmin) {
+      setLoading(false);
+      return;
+    }
     const timer = setTimeout(() => void load(), 0);
     return () => clearTimeout(timer);
-  }, [user?.id]);
+  }, [user?.id, isPlatformAdmin]);
 
   if (!user) return null;
   const greeting = user.name ? `Olá, ${user.name.split(" ")[0]}` : "Olá";
@@ -148,11 +162,10 @@ function HomeScreen() {
   return (
     <Screen>
       <Header title={greeting} subtitle={isClient ? "Pronto para cuidar do visual?" : isBarber ? "Aqui está sua agenda de hoje." : "Visão geral da operação."} />
+      {isPlatformAdmin ? <Card><Text style={styles.sectionTitle}>Painel Master</Text><Text style={styles.muted}>Gerencie as barbearias clientes, o plano de R$ 30 por mês e os pagamentos pendentes.</Text><Button icon="briefcase" onPress={() => router.push("/master")}>Abrir painel Master</Button></Card> : null}
       {loading ? <LoadingState label="Carregando seu resumo..." /> : null}
       {!loading && error ? <ErrorState message={error} onRetry={() => void load()} /> : null}
-      {!loading && !error && isClient ? (
-        clientUpcoming ? <UpcomingCard appointment={clientUpcoming} /> : <Card><Text style={styles.sectionTitle}>Nenhum próximo atendimento</Text><Text style={styles.muted}>Quando você tiver um agendamento, ele aparecerá aqui.</Text></Card>
-      ) : null}
+      {!loading && !error && isClient ? <UpcomingCard appointment={clientUpcoming} onOpenAgenda={() => router.push("/agenda")} onNewBooking={() => router.push("/booking")} /> : null}
       {!loading && !error && isBarber ? (
         <Card>
           <Text style={styles.sectionTitle}>Atendimentos de hoje</Text>
@@ -160,6 +173,10 @@ function HomeScreen() {
           {Array.isArray(barberAppointments) ? (
             barberAppointments.length ? barberAppointments.slice(0, 5).map((appointment: Appointment) => <View key={appointment.id} style={styles.row}><View style={{ flex: 1, gap: 3 }}><Text style={styles.body}>{appointment.client_name ?? "Cliente"}</Text><Text style={styles.muted}>{formatDateTime(appointment.starts_at)}{appointment.service_name ? ` · ${appointment.service_name}` : ""}</Text></View><StatusBadge status={appointment.status} /></View>) : <Text style={styles.muted}>Nenhum atendimento informado para hoje.</Text>
           ) : <Text style={styles.muted}>O servidor não retornou a agenda de hoje.</Text>}
+          <View style={{ gap: 10, marginTop: 14 }}>
+            <Button icon="calendar" onPress={() => router.push("/agenda")}>Abrir agenda completa</Button>
+            <Button variant="secondary" icon="plus" onPress={() => router.push("/booking")}>Novo agendamento</Button>
+          </View>
         </Card>
       ) : null}
       {!loading && !error && user.role === "admin" ? (
@@ -192,5 +209,10 @@ export default function IndexScreen() {
   if (authStatus === "restore_error" && !user) {
     return <Screen contentStyle={{ justifyContent: "center" }}><BrandHeader subtitle="Sua agenda, do seu jeito" /><ErrorState message={authError ?? "Não foi possível restaurar a sessão."} onRetry={() => void retryRestore()} /></Screen>;
   }
-  return user ? <HomeScreen /> : <LoginScreen />;
+  if (user) {
+    if (user.platform_admin && !user.barbershop_id) return <Redirect href="/master" />;
+    if (user.role === "barber" || user.role === "admin") return <Redirect href="/agenda" />;
+    return <Redirect href="/booking" />;
+  }
+  return <LoginScreen />;
 }

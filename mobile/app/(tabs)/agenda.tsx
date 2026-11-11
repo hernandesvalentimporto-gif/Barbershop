@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "expo-router";
 import { Text, View } from "react-native";
 
 import { api, isEndpointMissing } from "@/lib/barber/api";
@@ -11,6 +12,7 @@ import {
   formatDateTime,
   legalAppointmentStatusTransitions,
   nextDateKeys,
+  statusLabel,
   type AppointmentActionStatus,
 } from "@/lib/barber/utils";
 import {
@@ -30,6 +32,7 @@ import {
 
 export default function AgendaScreen() {
   const { authReady, user } = useBarber();
+  const router = useRouter();
   const dates = useMemo(() => nextDateKeys(), []);
   const [date, setDate] = useState(dates[0]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -41,7 +44,7 @@ export default function AgendaScreen() {
   const statusLocksRef = useRef(new Set<number>());
 
   const load = useCallback(async () => {
-    if (!authReady || !user || (user.role !== "barber" && user.role !== "admin")) return;
+    if (!authReady || !user || user.platform_admin || (user.role !== "barber" && user.role !== "admin")) return;
     setLoading(true);
     setError(null);
     setFallbackNotice(null);
@@ -73,7 +76,7 @@ export default function AgendaScreen() {
   }, [authReady, date, user]);
 
   useEffect(() => {
-    if (!authReady || !user || (user.role !== "barber" && user.role !== "admin")) return;
+    if (!authReady || !user || user.platform_admin || (user.role !== "barber" && user.role !== "admin")) return;
     const timer = setTimeout(() => void load(), 0);
     return () => clearTimeout(timer);
   }, [authReady, load, user]);
@@ -98,10 +101,11 @@ export default function AgendaScreen() {
     }
   }
 
-  if (!authReady || !user || (user.role !== "barber" && user.role !== "admin")) return null;
+  if (!authReady || !user || user.platform_admin || (user.role !== "barber" && user.role !== "admin")) return null;
   return (
     <Screen>
-      <Header title="Agenda" subtitle={user.role === "admin" ? "Acompanhe os atendimentos da equipe." : "Seus atendimentos e respectivos status."} right={<Button variant="ghost" icon="refresh-cw" onPress={() => void load()}>Atualizar</Button>} />
+      <Header title="Agenda" subtitle={user.role === "admin" ? "Acompanhe os atendimentos da equipe." : "Seus atendimentos e respectivos status."} right={<Button variant="ghost" icon="refresh-cw" onPress={() => void load()} />} />
+      <Button icon="plus" onPress={() => router.push("/booking")}>Novo agendamento</Button>
       <Card>
         <Text style={styles.sectionTitle}>Escolha a data</Text>
         <DateStrip dates={dates} selected={date} onSelect={setDate} />
@@ -126,7 +130,7 @@ export default function AgendaScreen() {
             {typeof appointment.price_cents === "number" ? <Text style={styles.gold}>{formatBRL(appointment.price_cents)}</Text> : null}
             {appointment.notes ? <Text style={styles.muted}>Observação: {appointment.notes}</Text> : null}
             {allowedStatuses.length ? <View style={styles.wrap}>
-              {allowedStatuses.map((status) => <ChoiceChip key={status} label={status.replace("_", " ")} selected={false} disabled={changingIds.has(appointment.id)} onPress={() => void changeStatus(appointment, status)} />)}
+              {allowedStatuses.map((status) => <ChoiceChip key={status} label={statusLabel(status)} selected={false} disabled={changingIds.has(appointment.id)} onPress={() => void changeStatus(appointment, status)} />)}
             </View> : null}
           </Card>
         );

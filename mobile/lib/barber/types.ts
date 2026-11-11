@@ -1,12 +1,19 @@
 export type BarberRole = "client" | "barber" | "admin";
 export type UserStatus = "active" | "inactive" | string;
+export type WorkDayKey = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+export type WorkDay = { enabled: boolean; start: string; end: string };
+export type WorkSchedule = Record<WorkDayKey, WorkDay>;
 
 export type BarberUser = {
   id: number;
   name: string;
   email: string;
+  phone?: string | null;
   role: BarberRole;
   status: UserStatus;
+  platform_admin?: boolean;
+  barbershop_id?: number | null;
+  work_schedule?: WorkSchedule | null;
 };
 
 export type Service = {
@@ -20,12 +27,17 @@ export type Service = {
 
 export type Catalog = {
   services: Service[];
-  barbers: Array<{ id: number; name: string }>;
+  barbers: { id: number; name: string }[];
 };
 
 export type AvailabilitySlot = {
   starts_at: string;
   ends_at: string;
+};
+
+export type AvailabilityResponse = {
+  slots: AvailabilitySlot[];
+  busy_slots?: AvailabilitySlot[];
 };
 
 export type Appointment = {
@@ -77,10 +89,12 @@ export type AppointmentListResponse = { appointments: Appointment[] };
 export type SaveUserInput = {
   id?: number;
   name: string;
-  email: string;
+  email?: string;
+  phone?: string;
   role: "client" | "barber";
   status: "active" | "inactive";
   password?: string;
+  work_schedule?: WorkSchedule;
 };
 
 export type SaveServiceInput = {
@@ -91,3 +105,24 @@ export type SaveServiceInput = {
   active: 0 | 1;
   description?: string;
 };
+
+export type MasterShop = {
+  id: number; name: string; monthly_amount_cents: number; payment_status: "paid" | "pending"; due_date: string; paid_at?: string | null; clients_count: number; barbers_count: number;
+};
+export type MasterDashboardResponse = { shops: MasterShop[]; plan_monthly_cents: number; totals: { shops: number; paid: number; pending: number } };
+
+export type MasterProspectFilters = { state?: string; city?: string; term?: string };
+export type MasterProspectLead = {
+  id?: number | string;
+  name: string;
+  phone?: string | null;
+  website?: string | null;
+  email?: string | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  status?: string | null;
+  status_label?: string | null;
+};
+export type MasterProspectSearchResponse = { leads?: MasterProspectLead[]; search_id?: string | number };
+export type MasterProspectLeadsResponse = { leads: MasterProspectLead[] };
