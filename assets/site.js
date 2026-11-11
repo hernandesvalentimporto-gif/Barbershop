@@ -66,7 +66,18 @@
         ['Barba Terapia', 4000],
         ['Barba', 3000],
         ['Reflexo', 10000],
-        ['Nevou', 12000]
+        ['Nevou', 12000],
+        ['Pigmentação de barba', 3000],
+        ['Hidratação capilar', 4000],
+        ['Platinado', 15000],
+        ['Luzes', 12000],
+        ['Relaxamento', 6000],
+        ['Alisamento', 8000],
+        ['Corte + Barba', 6500],
+        ['Corte + Sobrancelha', 5000],
+        ['Corte + Barba + Sobrancelha', 7500],
+        ['Corte + Hidratação', 7000],
+        ['Pacote VIP (corte + barba + toalha quente)', 8500]
     ];
 
     class ApiError extends Error {
@@ -1033,7 +1044,24 @@
         clear(content);
         const admin = state.user.role === 'admin';
         content.append(pageIntro('Serviços', admin ? 'Cadastre ou edite serviços sem inserir valores ou durações automaticamente.' : 'Serviços ativos disponíveis para agendamento.'));
+        content.append(defaultPriceTable(admin));
         renderServicesContent(content, services, admin);
+    }
+
+    function defaultPriceTable(admin) {
+        const services = serviceReferences.filter(([name]) => !name.startsWith('Corte +') && !name.startsWith('Pacote VIP'));
+        const combos = serviceReferences.filter(([name]) => name.startsWith('Corte +') || name.startsWith('Pacote VIP'));
+        const group = (title, items) => el('div', { className: 'price-reference-group' }, [
+            el('h4', { text: title }),
+            el('div', { className: 'price-reference-list' }, items.map(([name, cents]) => el('div', { className: 'price-reference-row' }, [
+                el('span', { text: name }), el('strong', { text: formatBRL(cents) })
+            ])))
+        ]);
+        return el('section', { className: 'card section-card default-price-table' }, [
+            el('h3', { text: 'Tabela de preços padrão da barbearia' }),
+            el('p', { className: 'section-description', text: admin ? 'Use estes valores como padrão e altere ou inative qualquer item no catálogo. A duração precisa ser confirmada antes de ativar para agendamento.' : 'Valores padrão informados pela barbearia.' }),
+            group('Serviços', services), group('Combos promocionais', combos)
+        ]);
     }
 
     function renderServicesContent(content, services, admin) {

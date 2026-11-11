@@ -2,6 +2,10 @@
 
 A interface web usa a instalação existente e fica em `https://sistemashp.com.br/barbershop/`. Não há nova build Android, migração dos dados ou reinstalação do banco. As credenciais existentes continuam válidas.
 
+## Tabela padrão da barbearia
+
+O cadastro de serviços apresenta a tabela padrão com os serviços e combos informados pela barbearia. O administrador pode usar cada valor como ponto de partida, alterar nome/preço/duração, salvar, inativar para remover da agenda ou cadastrar novos itens. A duração não foi inventada: cada item precisa ser confirmado antes de ficar disponível para agendamento. A inativação preserva o histórico de atendimentos.
+
 ## Operação
 
 Administrador: painel com contagens reais, agenda por data e botão **Novo atendimento**, seleção de cliente/barbeiro/serviço/horário disponível, confirmação/finalização/cancelamento, cadastro e edição de clientes/equipe/serviços, ativação/inativação sem excluir histórico. Clientes agendam para si e consultam/cancelam o que estiver autorizado; barbeiros consultam sua agenda e atualizam status autorizado. A referência de preços só preenche nome/preço quando escolhida e não inventa duração.
