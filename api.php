@@ -664,6 +664,29 @@ function apiServiceResponse(array $service): array
     ];
 }
 
+function apiSeedDefaultServicesIfEmpty(PDO $pdo, string $prefix, int $tenantId): void
+{
+    $count = $pdo->prepare("SELECT COUNT(*) FROM `{$prefix}services` WHERE barbershop_id = ?");
+    $count->execute([$tenantId]);
+    if ((int)$count->fetchColumn() > 0) return;
+
+    $defaults = [
+        ['Corte Máquina', 3500], ['Corte Tesoura', 4000], ['Corte Navalhado', 4000],
+        ['Barba Terapia', 4000], ['Barba', 3000], ['Reflexo', 10000], ['Nevou', 12000],
+        ['Pigmentação de barba', 3000], ['Hidratação capilar', 4000], ['Platinado', 15000],
+        ['Luzes', 12000], ['Relaxamento', 6000], ['Alisamento', 8000],
+        ['Corte + Barba', 6500], ['Corte + Sobrancelha', 5000],
+        ['Corte + Barba + Sobrancelha', 7500], ['Corte + Hidratação', 7000],
+        ['Pacote VIP (corte + barba + toalha quente)', 8500],
+    ];
+    $insert = $pdo->prepare("INSERT INTO `{$prefix}services`
+        (barbershop_id, name, duration_minutes, price_cents, active, description)
+        VALUES (?, ?, 30, ?, 1, ?)");
+    foreach ($defaults as [$name, $priceCents]) {
+        $insert->execute([$tenantId, $name, $priceCents, 'Catálogo padrão da barbearia — duração editável pelo administrador.']);
+    }
+}
+
 function apiAppointmentResponse(array $row): array
 {
     return [
@@ -1159,6 +1182,7 @@ function handleServices(PDO $pdo, string $prefix, array $user): never
 {
     apiRequireMethod('GET');
     $tenantId = apiTenantId($user);
+    apiSeedDefaultServicesIfEmpty($pdo, $prefix, $tenantId);
     $activeOnly = $user['role'] !== 'admin';
     $sql = "SELECT id, name, duration_minutes, price_cents, active, description FROM `{$prefix}services` WHERE barbershop_id = ?";
     $params = [$tenantId];
@@ -1511,6 +1535,7 @@ function handleCatalog(PDO $pdo, string $prefix, array $user): never
 {
     apiRequireMethod('GET');
     $tenantId = apiTenantId($user);
+    apiSeedDefaultServicesIfEmpty($pdo, $prefix, $tenantId);
     $stmt = $pdo->prepare("SELECT id, name, duration_minutes, price_cents FROM `{$prefix}services` WHERE barbershop_id = ? AND active = 1 ORDER BY name ASC, id ASC");
     $stmt->execute([$tenantId]); $services = $stmt->fetchAll();
     $stmt = $pdo->prepare("SELECT id, name, work_schedule FROM `{$prefix}users` WHERE barbershop_id = ? AND role = 'barber' AND status = 'active' ORDER BY name ASC, id ASC");
