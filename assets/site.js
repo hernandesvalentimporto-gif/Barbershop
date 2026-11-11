@@ -13,8 +13,8 @@
 
     const bootstrap = window.BARBERSHOP_BOOTSTRAP || { view: 'login' };
     const app = document.getElementById('app');
-    const routes = ['login', 'forgot', 'home', 'agenda', 'clients', 'team', 'services', 'account', 'booking', 'history', 'reset'];
-    const roleLabels = { admin: 'administrador', barber: 'barbeiro', client: 'cliente' };
+    const routes = ['login', 'forgot', 'home', 'agenda', 'clients', 'team', 'services', 'account', 'booking', 'history', 'platform', 'reset'];
+    const roleLabels = { admin: 'administrador da barbearia', barber: 'barbeiro', client: 'cliente' };
     const statusLabels = {
         pending: 'Pendente',
         confirmed: 'Confirmado',
@@ -22,8 +22,13 @@
         cancelled: 'Cancelado',
         no_show: 'Não compareceu'
     };
+    const subscriptionStatusLabels = {
+        trialing: 'Em teste', active: 'Pagando', past_due: 'Inadimplente', paused: 'Pausada', canceled: 'Cancelada', expired: 'Vencida', without_subscription: 'Sem assinatura'
+    };
     const errorLabels = {
-        invalid_credentials: 'E-mail ou senha inválidos.',
+        invalid_credentials: 'WhatsApp/e-mail ou senha inválidos.',
+        invalid_phone: 'Informe um WhatsApp válido com DDD.',
+        phone_already_exists: 'Já existe um cliente com este WhatsApp.',
         unauthorized: 'Sua sessão expirou. Entre novamente.',
         forbidden: 'Você não tem permissão para esta ação.',
         csrf_invalid: 'A página precisa ser atualizada antes de salvar.',
@@ -57,6 +62,16 @@
         internal_error: 'Não foi possível concluir a operação agora.',
         not_found: 'Recurso não encontrado.',
         not_installed: 'O serviço ainda não está disponível.',
+        billing_not_ready: 'A estrutura comercial ainda não foi ativada no banco de dados.',
+        invalid_plan: 'Confira nome, código, preço, periodicidade e teste do plano.',
+        plan_code_exists: 'Já existe um plano com esse código.',
+        invalid_platform_customer: 'Confira os dados da barbearia, do responsável e uma senha com pelo menos 8 caracteres.',
+        invalid_platform_customer_update: 'Confira o nome, o contato, o telefone, o endereço e o e-mail do responsável.',
+        platform_owner_not_found: 'Não foi encontrada uma conta de responsável para editar nesta barbearia.',
+        invalid_checkout_request: 'Informe a barbearia, o plano e um e-mail válido para o checkout.',
+        barbershop_not_found: 'Barbearia não encontrada.',
+        payment_not_configured: 'O pagamento ainda não está configurado no servidor.',
+        payment_provider_error: 'O provedor de pagamento não aceitou o checkout agora.',
         csrf_unavailable: 'Não foi possível iniciar a proteção da sessão.'
     };
     const serviceReferences = [
@@ -97,8 +112,13 @@
         agendaDate: saoPauloToday(),
         editingUser: null,
         editingService: null,
+        platformSection: 'overview',
+        platformCustomerFilter: 'all',
+        platformDetailId: null,
+        platformEditingShop: false,
         renderId: 0,
-        toastTimer: null
+        toastTimer: null,
+        whatsappInvite: null
     };
 
     function el(tag, attrs = {}, children = []) {
@@ -270,8 +290,9 @@
     }
 
     function field(labelText, input, hint = '') {
-        const id = input.id || `field-${Math.random().toString(36).slice(2)}`;
-        input.id = id;
+        const nestedInput = input.querySelector && input.querySelector('input');
+        const id = input.id || (nestedInput ? nestedInput.id : '') || `field-${Math.random().toString(36).slice(2)}`;
+        if (!input.id && !nestedInput) input.id = id;
         return el('div', { className: 'field' }, [
             el('label', { htmlFor: id, text: labelText }),
             input,
@@ -281,6 +302,19 @@
 
     function input(type, id, value = '', options = {}) {
         return el('input', Object.assign({ type, id, value }, options));
+    }
+
+    function passwordControl(id, options = {}) {
+        const password = input('password', id, '', Object.assign({ autocomplete: 'off' }, options));
+        const toggle = button('Mostrar senha', 'button ghost small', () => {
+            const showing = password.type === 'text';
+            password.type = showing ? 'password' : 'text';
+            toggle.textContent = showing ? 'Mostrar senha' : 'Ocultar senha';
+            toggle.setAttribute('aria-pressed', showing ? 'false' : 'true');
+        });
+        toggle.setAttribute('aria-controls', id);
+        toggle.setAttribute('aria-pressed', 'false');
+        return el('div', { className: 'password-control' }, [password, toggle]);
     }
 
     function selectInput(id, options = {}) {
@@ -297,7 +331,28 @@
         });
     }
 
+    function normalizeSearchText(value) {
+        return String(value || '').trim().toLocaleLowerCase('pt-BR').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    }
+
+    function bindSearchToSelect(searchInput, select, items, fields) {
+        const itemById = new Map(items.map((item) => [String(item.id), item]));
+        const applyFilter = () => {
+            const query = normalizeSearchText(searchInput.value);
+            Array.from(select.options).forEach((option) => {
+                if (!option.value) return;
+                const item = itemById.get(String(option.value));
+                const phoneDigits = item && item.phone ? String(item.phone).replace(/\D/g, '') : '';
+                const searchable = item ? `${fields.map((key) => item[key] || '').join(' ')} ${phoneDigits}` : option.textContent || '';
+                option.hidden = Boolean(query) && !normalizeSearchText(searchable).includes(query) && !option.selected;
+            });
+        };
+        searchInput.addEventListener('input', applyFilter);
+        applyFilter();
+    }
+
     function navItems(role) {
+        if (state.user && state.user.platform_admin) return [['platform', 'Plataforma', 'PL'], ['account', 'Conta', 'CT']];
         if (role === 'admin') return [
             ['home', 'Início', 'IN'], ['agenda', 'Agenda', 'AG'], ['clients', 'Clientes', 'CL'], ['services', 'Serviços', 'SV'], ['more', 'Mais', '…']
         ];
@@ -305,16 +360,17 @@
             ['home', 'Início', 'IN'], ['agenda', 'Agenda', 'AG'], ['services', 'Serviços', 'SV'], ['account', 'Conta', 'CT'], ['more', 'Mais', '…']
         ];
         return [
-            ['home', 'Início', 'IN'], ['booking', 'Agendar', 'AG'], ['history', 'Histórico', 'HI'], ['account', 'Conta', 'CT'], ['more', 'Mais', '…']
+            ['home', 'Início', 'IN'], ['agenda', 'Agenda', 'AG'], ['booking', 'Agendar', '＋'], ['history', 'Histórico', 'HI'], ['account', 'Conta', 'CT']
         ];
     }
 
     function desktopNavItems(role) {
+        if (state.user && state.user.platform_admin) return [['platform', 'Plataforma', 'PL'], ['account', 'Conta', 'CT']];
         if (role === 'admin') return [
             ['home', 'Início', 'IN'], ['agenda', 'Agenda', 'AG'], ['clients', 'Clientes', 'CL'], ['team', 'Equipe', 'EQ'], ['services', 'Serviços', 'SV'], ['account', 'Conta', 'CT']
         ];
         if (role === 'barber') return [['home', 'Início', 'IN'], ['agenda', 'Agenda', 'AG'], ['services', 'Serviços', 'SV'], ['account', 'Conta', 'CT']];
-        return [['home', 'Início', 'IN'], ['booking', 'Agendar', 'AG'], ['history', 'Histórico', 'HI'], ['account', 'Conta', 'CT']];
+        return [['home', 'Início', 'IN'], ['agenda', 'Agenda', 'AG'], ['booking', 'Agendar', '＋'], ['history', 'Histórico', 'HI'], ['account', 'Conta', 'CT']];
     }
 
     function navigate(view, replace = false) {
@@ -344,13 +400,21 @@
         const old = document.getElementById('more-menu');
         if (old) { old.remove(); return; }
         const role = state.user ? state.user.role : 'client';
-        const menu = el('div', { id: 'more-menu', className: 'more-menu', role: 'menu' });
-        const options = role === 'admin' ? [['team', 'Equipe'], ['account', 'Minha conta']] : role === 'barber' ? [['account', 'Minha conta']] : [['account', 'Minha conta']];
-        options.forEach(([view, label]) => {
-            const item = button(label, '', () => { menu.remove(); navigate(view); });
+        const menu = el('div', { id: 'more-menu', className: 'more-menu', role: 'menu' }, [
+            el('div', { className: 'more-menu-title', text: 'Mais opções' })
+        ]);
+        const options = role === 'admin'
+            ? [['clients', 'Clientes', 'CL'], ['team', 'Equipe', 'EQ'], ['services', 'Serviços', 'SV'], ['account', 'Minha conta', 'CT']]
+            : role === 'barber'
+                ? [['services', 'Serviços', 'SV'], ['account', 'Minha conta', 'CT']]
+                : [['account', 'Minha conta', 'CT']];
+        options.forEach(([view, label, symbol]) => {
+            const item = button('', 'more-menu-item', () => { menu.remove(); navigate(view); });
+            item.append(el('span', { className: 'more-menu-symbol', text: symbol }), el('span', { text: label }));
             item.setAttribute('role', 'menuitem');
             menu.appendChild(item);
         });
+        menu.appendChild(button('Fechar', 'button ghost small more-menu-close', () => menu.remove()));
         document.body.appendChild(menu);
         const close = (event) => {
             if (!menu.contains(event.target) && event.target !== anchor) {
@@ -372,7 +436,7 @@
             ]),
             el('div', { className: 'sidebar-user' }, [
                 el('div', { className: 'user-name', text: user.name }),
-                el('div', { className: 'user-role', text: roleLabel(user.role) })
+                el('div', { className: 'user-role', text: user.platform_admin ? 'administrador da plataforma' : roleLabel(user.role) })
             ]),
             el('nav', { className: 'nav-list', 'aria-label': 'Navegação principal' }, desktopNavItems(user.role).map((item) => renderNavItem(item))),
             el('div', { className: 'sidebar-footer', text: 'Agenda online • horário de São Paulo' })
@@ -380,8 +444,11 @@
         const pageTitle = pageTitleFor(state.view, user.role);
         const topbar = el('header', { className: 'topbar' }, [
             el('div', { className: 'topbar-title' }, [
-                el('div', { className: 'eyebrow', text: 'SISTEMAS HP' }),
-                el('h1', { text: pageTitle })
+                el('img', { className: 'topbar-brand-image', src: 'assets/logo.png', width: 52, height: 48, alt: 'Barber Shop Sistemas HP' }),
+                el('div', { className: 'topbar-copy' }, [
+                    el('div', { className: 'eyebrow', text: 'SISTEMAS HP' }),
+                    el('h1', { text: pageTitle })
+                ])
             ]),
             el('div', { className: 'topbar-actions' }, [
                 el('span', { className: 'user-role', text: user.name }),
@@ -389,14 +456,15 @@
             ])
         ]);
         const content = el('main', { id: 'main-content', className: 'main-content', tabindex: '-1' });
-        const mobile = el('nav', { className: 'mobile-nav', 'aria-label': 'Navegação móvel' }, navItems(user.role).map((item) => renderNavItem(item, true)));
+        const mobileClass = user.platform_admin ? 'mobile-nav platform-mobile-nav' : 'mobile-nav';
+        const mobile = el('nav', { className: mobileClass, 'aria-label': 'Navegação móvel' }, navItems(user.role).map((item) => renderNavItem(item, true)));
         const mainArea = el('div', { className: 'main-area' }, [topbar, content, mobile]);
         app.append(sidebar, mainArea);
         return content;
     }
 
     function pageTitleFor(view, role) {
-        const titles = { home: 'Visão geral', agenda: 'Agenda', clients: 'Clientes', team: 'Equipe', services: 'Serviços', account: 'Minha conta', booking: 'Novo agendamento', history: 'Meu histórico', login: 'Entrar', forgot: 'Recuperar senha', reset: 'Redefinir senha' };
+        const titles = { home: 'Visão geral', platform: 'Painel da plataforma', agenda: 'Agenda', clients: 'Clientes', team: 'Equipe', services: 'Serviços', account: 'Minha conta', booking: 'Novo agendamento', history: 'Meu histórico', login: 'Entrar', forgot: 'Recuperar senha', reset: 'Redefinir senha' };
         if (view === 'home' && role === 'admin') return 'Dashboard';
         return titles[view] || 'Barber Shop';
     }
@@ -477,14 +545,14 @@
     }
 
     function renderLogin(card) {
-        card.append(el('h2', { text: 'Entrar na conta' }), el('p', { className: 'subheading', text: 'Use o e-mail da sua conta Barber Shop.' }));
-        const form = el('form', { className: 'auth-form', novalidate: true });
-        const email = input('email', 'login-email', '', { autocomplete: 'username', required: true, maxlength: 190, placeholder: 'voce@exemplo.com' });
-        const password = input('password', 'login-password', '', { autocomplete: 'current-password', required: true, maxlength: 4096, placeholder: 'Sua senha' });
+        card.append(el('h2', { text: 'Entrar na conta' }), el('p', { className: 'subheading', text: 'Use seu WhatsApp/telefone ou e-mail e a senha.' }));
+        const form = el('form', { className: 'auth-form', novalidate: true, autocomplete: 'off' });
+        const email = input('text', 'login-email', '', { autocomplete: 'username', required: true, maxlength: 190, placeholder: '(00) 00000-0000 ou e-mail' });
+        const password = passwordControl('login-password', { required: true, maxlength: 4096, placeholder: 'Sua senha' });
         const message = el('p', { className: 'form-message', role: 'alert', 'aria-live': 'polite' });
         const submit = button('Entrar', 'button block');
         submit.type = 'submit';
-        form.append(field('E-mail', email), field('Senha', password), message, submit);
+        form.append(field('WhatsApp/telefone ou e-mail', email), field('Senha', password), message, submit);
         form.addEventListener('submit', async (event) => {
             event.preventDefault();
             if (!form.reportValidity() || submit.disabled) return;
@@ -492,7 +560,7 @@
             message.className = 'form-message';
             message.textContent = '';
             try {
-                const result = await api('login', { method: 'POST', body: { email: email.value.trim(), password: password.value } });
+                const result = await api('login', { method: 'POST', body: { identifier: email.value.trim(), password: password.querySelector('input').value } });
                 state.user = result.user || null;
                 if (!state.user) throw new ApiError('invalid_credentials', 401);
                 navigate(defaultViewForRole(state.user.role), true);
@@ -503,7 +571,25 @@
                 setButtonBusy(submit, false);
             }
         });
-        card.append(form, el('div', { className: 'auth-links' }, [authLink('Esqueci minha senha', 'forgot')]));
+        const downloads = el('div', { className: 'app-downloads' }, [
+            el('strong', { text: 'Acesse o aplicativo no celular' }),
+            el('p', { text: 'Use o mesmo WhatsApp/telefone e senha. No iPhone, não precisa baixar arquivo.' }),
+            el('div', { className: 'download-actions' }, [
+                el('a', { className: 'button block', href: 'https://github.com/hernandesvalentimporto-gif/Barbershop/releases/latest/download/Barbershop-SistemasHP.apk', target: '_blank', rel: 'noopener', text: 'Android — baixar aplicativo' }),
+                el('a', { className: 'button secondary block', href: '#iphone-install', text: 'iPhone — colocar na tela inicial' })
+            ]),
+            el('div', { id: 'iphone-install', className: 'iphone-guide' }, [
+                el('strong', { text: 'Como colocar no iPhone' }),
+                el('ol', {}, [
+                    el('li', { text: 'Abra este site pelo navegador Safari.' }),
+                    el('li', { text: 'Toque no botão Compartilhar (quadrado com uma seta para cima).' }),
+                    el('li', { text: 'Deslize a lista e toque em “Adicionar à Tela de Início”.' }),
+                    el('li', { text: 'Toque em “Adicionar”. Pronto: o ícone ficará junto dos outros aplicativos.' })
+                ]),
+                el('p', { className: 'guide-note', text: 'Se não aparecer “Adicionar à Tela de Início”, confirme que o site está aberto no Safari, e não dentro do WhatsApp.' })
+            ])
+        ]);
+        card.append(form, downloads, el('div', { className: 'auth-links' }, [authLink('Esqueci minha senha', 'forgot')]));
     }
 
     function renderForgot(card) {
@@ -521,8 +607,20 @@
             message.className = 'form-message';
             try {
                 const result = await api('forgot_password', { method: 'POST', body: { email: email.value.trim() } });
-                message.className = 'form-message success';
-                message.textContent = result.message || 'Se houver uma conta, as instruções foram enviadas.';
+                if (result.email_enabled === false) {
+                    message.className = 'form-message error';
+                    message.textContent = 'A recuperação por e-mail está temporariamente indisponível. Avise o administrador da plataforma.';
+                } else {
+                    form.hidden = true;
+                    const confirmation = el('div', { className: 'card section-card recovery-confirmation' }, [
+                        el('div', { className: 'success-icon', text: '✓', 'aria-hidden': 'true' }),
+                        el('h2', { text: 'Verifique seu e-mail' }),
+                        el('p', { className: 'subheading', text: 'Se este e-mail estiver cadastrado, enviamos um link para redefinir sua senha.' }),
+                        el('p', { className: 'field-hint', text: 'Confira também a pasta de spam ou lixo eletrônico. O link tem validade limitada.' }),
+                        el('div', { className: 'form-actions' }, [button('Voltar para entrar', 'button secondary block', () => navigate('login'))])
+                    ]);
+                    card.insertBefore(confirmation, form.nextSibling);
+                }
             } catch (error) {
                 message.className = 'form-message error';
                 message.textContent = friendlyError(error);
@@ -540,23 +638,25 @@
             card.append(el('div', { className: 'error-state', role: 'alert' }, [el('strong', { text: 'Link incompleto.' }), el('span', { text: 'Abra o link de recuperação recebido por e-mail.' })]), el('div', { className: 'auth-links' }, [authLink('Voltar para entrar', 'login')]));
             return;
         }
-        const form = el('form', { className: 'auth-form', novalidate: true });
-        const password = input('password', 'reset-password', '', { autocomplete: 'new-password', required: true, minlength: 8, maxlength: 4096, placeholder: 'Mínimo de 8 caracteres' });
-        const confirm = input('password', 'reset-confirm', '', { autocomplete: 'new-password', required: true, minlength: 8, maxlength: 4096, placeholder: 'Repita a nova senha' });
+        const form = el('form', { className: 'auth-form', novalidate: true, autocomplete: 'off' });
+        const password = passwordControl('reset-password', { required: true, minlength: 8, maxlength: 4096, placeholder: 'Mínimo de 8 caracteres' });
+        const confirm = passwordControl('reset-confirm', { required: true, minlength: 8, maxlength: 4096, placeholder: 'Repita a nova senha' });
         const message = el('p', { className: 'form-message', role: 'alert', 'aria-live': 'polite' });
         const submit = button('Salvar nova senha', 'button block');
         submit.type = 'submit';
         form.append(field('Nova senha', password, 'Use pelo menos 8 caracteres.'), field('Confirmar nova senha', confirm), message, submit);
         form.addEventListener('submit', async (event) => {
             event.preventDefault();
-            if (!form.reportValidity() || password.value !== confirm.value || submit.disabled) {
-                if (password.value !== confirm.value) { message.className = 'form-message error'; message.textContent = 'As senhas não coincidem.'; }
+            const passwordValue = password.querySelector('input').value;
+            const confirmValue = confirm.querySelector('input').value;
+            if (!form.reportValidity() || passwordValue !== confirmValue || submit.disabled) {
+                if (passwordValue !== confirmValue) { message.className = 'form-message error'; message.textContent = 'As senhas não coincidem.'; }
                 return;
             }
             setButtonBusy(submit, true, 'Salvando...');
             message.className = 'form-message';
             try {
-                const result = await api('reset_password', { method: 'POST', body: { token, new_password: password.value, new_password_confirm: confirm.value } });
+                const result = await api('reset_password', { method: 'POST', body: { token, new_password: passwordValue, new_password_confirm: confirmValue } });
                 state.resetToken = '';
                 message.className = 'form-message success';
                 message.textContent = result.message || 'Senha redefinida. Você já pode entrar.';
@@ -572,11 +672,12 @@
     }
 
     function defaultViewForRole(role) {
+        if (state.user && state.user.platform_admin) return 'platform';
         return role === 'client' ? 'home' : 'home';
     }
 
     async function renderAuthenticated() {
-        const validViews = state.user.role === 'admin' ? ['home', 'agenda', 'clients', 'team', 'services', 'account'] : state.user.role === 'barber' ? ['home', 'agenda', 'services', 'account'] : ['home', 'booking', 'history', 'account'];
+        const validViews = state.user.platform_admin ? ['platform', 'account'] : state.user.role === 'admin' ? ['home', 'agenda', 'clients', 'team', 'services', 'account'] : state.user.role === 'barber' ? ['home', 'agenda', 'services', 'account'] : ['home', 'agenda', 'booking', 'history', 'account'];
         if (!validViews.includes(state.view)) {
             state.view = 'home';
             const url = new URL(window.location.href);
@@ -603,6 +704,7 @@
     }
 
     async function renderView(content, renderId) {
+        if (state.view === 'platform') return renderPlatformPage(content);
         if (state.view === 'home') return renderHome(content);
         if (state.view === 'agenda') return renderAgenda(content);
         if (state.view === 'clients') return renderPeoplePage(content, 'client');
@@ -624,28 +726,508 @@
         return el('div', { className: 'card stat-card' }, [el('div', { className: 'stat-label', text: label }), el('div', { className: 'stat-value', text: value === undefined || value === null ? '—' : value })]);
     }
 
+    function subscriptionPill(status) {
+        return el('span', { className: `status ${status || ''}`, text: subscriptionStatusLabels[status] || status || 'Sem status' });
+    }
+
+    function platformSectionTabs() {
+        const sections = [['overview', 'Visão geral'], ['shops', 'Barbearias'], ['finance', 'Financeiro'], ['billing', 'Planos'], ['prospecting', 'Prospecção'], ['mailtest', 'Teste de e-mail']];
+        return el('nav', { className: 'platform-tabs', role: 'group', 'aria-label': 'Áreas administrativas da plataforma' }, sections.map(([id, label]) => {
+            const active = state.platformSection === id;
+            const control = button(label, 'platform-tab', () => {
+                state.platformSection = id;
+                renderApp();
+            });
+            control.setAttribute('aria-pressed', active ? 'true' : 'false');
+            return control;
+        }));
+    }
+
+    function formatUtcDateTime(value) {
+        if (!value) return 'Sem data';
+        const parsed = new Date(String(value).replace(' ', 'T') + (String(value).endsWith('Z') ? '' : 'Z'));
+        if (Number.isNaN(parsed.getTime())) return String(value);
+        return new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Sao_Paulo' }).format(parsed);
+    }
+
+    function renderPlatformProspecting(hidden) {
+        const section = el('section', { className: 'card section-card platform-panel', hidden });
+        section.append(el('h3', { text: 'Prospecção de barbearias' }), el('p', { className: 'section-description', text: 'Escolha Brasil inteiro ou um estado. Os resultados trazem nome, e-mail, telefone e endereço quando encontrados.' }));
+        const form = el('form', { className: 'form-card', novalidate: true });
+        const states = [['', 'Brasil inteiro'], ['AC', 'Acre'], ['AL', 'Alagoas'], ['AP', 'Amapá'], ['AM', 'Amazonas'], ['BA', 'Bahia'], ['CE', 'Ceará'], ['DF', 'Distrito Federal'], ['ES', 'Espírito Santo'], ['GO', 'Goiás'], ['MA', 'Maranhão'], ['MT', 'Mato Grosso'], ['MS', 'Mato Grosso do Sul'], ['MG', 'Minas Gerais'], ['PA', 'Pará'], ['PB', 'Paraíba'], ['PR', 'Paraná'], ['PE', 'Pernambuco'], ['PI', 'Piauí'], ['RJ', 'Rio de Janeiro'], ['RN', 'Rio Grande do Norte'], ['RS', 'Rio Grande do Sul'], ['RO', 'Rondônia'], ['RR', 'Roraima'], ['SC', 'Santa Catarina'], ['SP', 'São Paulo'], ['SE', 'Sergipe'], ['TO', 'Tocantins']];
+        const stateSelect = selectInput('master-prospect-state'); addSelectOptions(stateSelect, states.map(([id, name]) => ({ id, name })), null);
+        const termInput = input('text', 'master-prospect-term', 'barbearia', { maxlength: 160, placeholder: 'Ex.: barbearia, salão masculino' });
+        const submit = button('Buscar barbearias', 'button'); submit.type = 'submit';
+        const message = el('p', { className: 'form-message', role: 'status', 'aria-live': 'polite' });
+        const list = el('div', { className: 'record-list' });
+        form.append(el('div', { className: 'form-grid' }, [field('Localização', stateSelect), field('O que procurar', termInput)]), message, el('div', { className: 'form-actions' }, [submit]));
+        function openContact(url) { window.open(url, '_blank', 'noopener,noreferrer'); }
+        function renderLeads(leads) {
+            clear(list);
+            if (!leads.length) { list.append(emptyState('Nenhuma barbearia encontrada', 'Tente Brasil inteiro ou outro estado.')); return; }
+            leads.forEach((lead) => {
+                const actions = []; const phone = String(lead.phone || '').replace(/\D/g, '');
+                if (phone) actions.push(button('WhatsApp', 'button secondary small', () => { const waPhone = phone.startsWith('55') ? phone : `55${phone}`; const text = `Olá, tudo bem? Meu nome é Hernandes, da Sistemas HP. Vi a ${lead.name} e gostaria de apresentar nossa agenda online para barbearias, barber shops, barbeiros e salões. Posso explicar como funciona?`; openContact(`https://wa.me/${waPhone}?text=${encodeURIComponent(text)}`); }));
+                if (lead.website) actions.push(button('Site', 'button secondary small', () => openContact(/^https?:\/\//i.test(lead.website) ? lead.website : `https://${lead.website}`)));
+                if (lead.email) actions.push(button('E-mail', 'button secondary small', () => { window.location.href = `mailto:${lead.email}`; }));
+                list.append(el('article', { className: 'record-row' }, [el('div', { className: 'record-main' }, [el('strong', { text: lead.name }), el('span', { text: lead.address || [lead.city, lead.state].filter(Boolean).join(' / ') || 'Endereço não informado' }), lead.phone ? el('span', { text: `Telefone: ${lead.phone}` }) : null, lead.email ? el('span', { text: `E-mail: ${lead.email}` }) : null]), el('div', { className: 'record-secondary' }, [el('span', { className: 'status', text: lead.status_label || 'NOVO' }), el('div', { className: 'form-actions' }, actions)])]));
+            });
+        }
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault(); if (submit.disabled) return;
+            setButtonBusy(submit, true, 'Buscando...'); message.className = 'form-message'; message.textContent = '';
+            try {
+                const result = await api('master_prospect_search', { method: 'POST', body: { state: stateSelect.value, city: '', term: termInput.value.trim() } });
+                renderLeads(Array.isArray(result.leads) ? result.leads : []); message.className = 'form-message success'; message.textContent = `Busca concluída: ${Number(result.saved_count || 0)} cadastro(s) salvo(s) para revisão. Escolha um canal para iniciar o contato.`;
+            } catch (error) {
+                const messages = { prospecting_not_configured: 'A prospecção ainda não está configurada no servidor. Verifique as chaves dos buscadores.', prospecting_search_auth: 'A chave da Tavily foi recusada. Confira o Secret BARBERSHOP_TAVILY_API_KEY.', prospecting_search_limit: 'A Tavily informou limite de uso. Tente novamente mais tarde.', prospecting_search_network: 'A hospedagem não conseguiu conectar à Tavily.', prospecting_search_failed: 'A Tavily recusou a consulta. Tente novamente em alguns minutos.', prospecting_search_invalid_response: 'A Tavily respondeu em formato inesperado.', prospecting_no_results: 'Nenhuma página pública foi encontrada para essa pesquisa.', prospecting_ai_auth: 'A chave do OpenRouter foi recusada. Confira o Secret BARBERSHOP_OPENROUTER_API_KEY.', prospecting_ai_limit: 'O OpenRouter atingiu o limite temporário. Os resultados públicos ainda podem ser salvos sem enriquecimento.', prospecting_ai_network: 'A hospedagem não conseguiu conectar ao OpenRouter. Os resultados públicos ainda podem ser salvos.', prospecting_ai_failed: 'A IA não conseguiu organizar os dados. Tente novamente; os resultados públicos serão mantidos para revisão.', prospecting_runtime_error: 'O servidor encontrou um erro interno na rotina de prospecção. O código técnico foi registrado para correção.' };
+                message.className = 'form-message error'; message.textContent = (messages[error.code] || friendlyError(error)) + (error.code === 'prospecting_runtime_error' && error.message ? ` ${error.message}` : '');
+            } finally { setButtonBusy(submit, false); }
+        });
+        section.append(form, list); return section;
+    }
+
+    function renderPlatformMailTest(hidden) {
+        const section = el('section', { className: 'card section-card platform-panel', hidden });
+        section.append(el('h3', { text: 'Teste de e-mail SMTP' }), el('p', { className: 'section-description', text: 'Envie um e-mail de teste e veja exatamente em qual etapa o servidor respondeu.' }));
+        const form=el('form',{className:'form-card',novalidate:true}); const recipient=input('email','smtp-test-recipient','hernandesporto@gmail.com',{required:true,autocomplete:'email'}); const submit=button('Enviar teste SMTP','button'); submit.type='submit'; const message=el('p',{className:'form-message',role:'status','aria-live':'polite'}); const resultBox=el('div',{className:'record-list'});
+        form.append(el('div',{className:'form-grid'},[field('E-mail que receberá o teste',recipient)]),message,el('div',{className:'form-actions'},[submit]));
+        form.addEventListener('submit',async(e)=>{e.preventDefault(); if(!form.reportValidity()||submit.disabled)return; setButtonBusy(submit,true,'Testando...'); clear(resultBox); message.className='form-message'; message.textContent=''; try { const response=await api('mail_test',{method:'POST',body:{recipient:recipient.value.trim()}}); const r=response.result||{}; message.className='form-message '+(r.ok?'success':'error'); message.textContent=r.ok?'Teste aceito pelo servidor SMTP. Confira a caixa de entrada e o spam.':'O teste falhou. Veja a etapa marcada em vermelho.'; resultBox.append(el('article',{className:'record-row'},[el('div',{className:'record-main'},[el('strong',{text:`Servidor: ${r.host||'não informado'}:${r.port||''} (${r.secure||''})`}),...(r.stages||[]).map(st=>el('span',{text:`${st.status==='ok'?'✓':'✗'} ${st.name}: ${st.detail}`}))])])); } catch(err){message.className='form-message error';message.textContent=friendlyError(err);} finally{setButtonBusy(submit,false);}});
+        section.append(form,resultBox); return section;
+    }
+
+    async function renderPlatformPage(content) {
+        const result = await api('platform_dashboard');
+        const metrics = result.metrics || {};
+        const upcoming = Array.isArray(result.upcoming) ? result.upcoming : [];
+        const recentSignups = Array.isArray(result.recent_signups) ? result.recent_signups : [];
+        if (!['overview', 'shops', 'finance', 'billing', 'prospecting', 'mailtest', 'detail'].includes(state.platformSection)) state.platformSection = 'overview';
+        const sectionKey = state.platformSection;
+        clear(content);
+        content.append(pageIntro(sectionKey === 'detail' ? 'Cadastro da barbearia' : 'Painel da plataforma', sectionKey === 'detail' ? 'Dados comerciais e usuários vinculados a esta conta.' : 'Gerencie sua plataforma SaaS, as barbearias, o financeiro e os planos.', [button('Atualizar dados', 'button secondary', () => renderApp())]));
+        content.append(el('div', { hidden: sectionKey === 'detail' }, [platformSectionTabs()]));
+        content.append(el('div', { className: 'stats-grid platform-stats', hidden: sectionKey !== 'overview' }, [
+            statCard('Barbearias cadastradas', metrics.barbershops),
+            statCard('Assinaturas pagantes', metrics.active_subscriptions),
+            statCard('Em teste', metrics.trialing),
+            statCard('Inadimplentes', metrics.past_due),
+            statCard('Testes vencidos', metrics.expired),
+            statCard('Barbeiros ativos', metrics.active_barbers),
+            statCard('Clientes cadastrados', metrics.total_clients),
+            statCard('Clientes ativos', metrics.active_clients),
+            statCard('Clientes inativos', metrics.inactive_clients)
+        ]));
+        const section = el('section', { className: 'card section-card platform-panel', hidden: sectionKey !== 'overview' }, [
+            el('h3', { text: 'Atenção comercial' }),
+            el('p', { className: 'section-description', text: 'Testes e assinaturas que precisam de acompanhamento.' })
+        ]);
+        if (!upcoming.length) {
+            section.append(emptyState('Nenhuma assinatura pendente', 'Os dados aparecerão aqui quando houver testes ou cobranças em acompanhamento.'));
+        } else {
+            const list = el('div', { className: 'record-list' });
+            upcoming.forEach((item) => {
+                const deadline = item.status === 'trialing' ? item.trial_ends_at : item.current_period_end;
+                list.appendChild(el('article', { className: 'record-row' }, [
+                    el('div', { className: 'record-main' }, [
+                        el('strong', { text: item.barbershop_name }),
+                        el('span', { text: item.status === 'trialing' ? `Teste termina em ${formatUtcDateTime(deadline)}` : `Período atual até ${formatUtcDateTime(deadline)}` })
+                    ]),
+                    el('div', { className: 'record-secondary' }, [subscriptionPill(item.status), el('span', { text: item.plan_name || item.plan_code || 'Plano não definido' })])
+                ]));
+            });
+            section.append(list);
+        }
+        content.append(section);
+
+        const recentSection = el('section', { className: 'card section-card platform-panel', hidden: sectionKey !== 'overview' }, [
+            el('h3', { text: 'Cadastros recentes' }),
+            el('p', { className: 'section-description', text: 'Últimas barbearias adicionadas e situação atual da assinatura.' })
+        ]);
+        if (!recentSignups.length) {
+            recentSection.append(emptyState('Nenhuma barbearia cadastrada', 'Os novos cadastros aparecerão aqui.'));
+        } else {
+            const recentList = el('div', { className: 'record-list' });
+            recentSignups.forEach((item) => recentList.appendChild(el('article', { className: 'record-row' }, [
+                el('div', { className: 'record-main' }, [
+                    el('strong', { text: item.name }),
+                    el('span', { text: `Cadastro em ${formatUtcDateTime(item.created_at)}` })
+                ]),
+                el('div', { className: 'record-secondary' }, [subscriptionPill(item.subscription_status)])
+            ])));
+            recentSection.append(recentList);
+        }
+        content.append(recentSection);
+        content.append(renderPlatformProspecting(sectionKey !== 'prospecting'));
+        content.append(renderPlatformMailTest(sectionKey !== 'mailtest'));
+
+        const customersSection = el('section', { className: 'card section-card', hidden: sectionKey !== 'shops' }, [
+            el('h3', { text: 'Clientes comerciais' }),
+            el('p', { className: 'section-description', text: 'Barbearias cadastradas, plano, período, situação da assinatura e contatos.' })
+        ]);
+        try {
+            const customerResult = await api('platform_customers');
+            const customers = Array.isArray(customerResult.customers) ? customerResult.customers : [];
+            if (!customers.length) {
+                customersSection.append(emptyState('Nenhuma barbearia cadastrada', 'Cadastre o primeiro cliente comercial abaixo.'));
+            } else {
+                const filters = [['all', 'Todas'], ['active', 'Pagando'], ['trialing', 'Em teste'], ['attention', 'Precisa de atenção']];
+                const filterBar = el('div', { className: 'filter-buttons', role: 'group', 'aria-label': 'Filtrar barbearias pela assinatura' });
+                const list = el('div', { className: 'record-list' });
+                const renderCustomerList = () => {
+                    clear(list);
+                    const filtered = customers.filter((customer) => {
+                        if (state.platformCustomerFilter === 'all') return true;
+                        if (state.platformCustomerFilter === 'attention') return ['past_due', 'expired', 'paused', 'canceled', 'without_subscription'].includes(customer.subscription_status);
+                        return customer.subscription_status === state.platformCustomerFilter;
+                    });
+                    if (!filtered.length) {
+                        list.append(emptyState('Nenhuma barbearia nesta situação', 'Escolha outro filtro para ver mais cadastros.'));
+                        return;
+                    }
+                    filtered.forEach((customer) => {
+                    const deadline = customer.subscription_status === 'trialing' ? customer.trial_ends_at : customer.current_period_end;
+                    const period = deadline ? `Próximo marco: ${formatUtcDateTime(deadline)}` : 'Sem data de cobrança';
+                    const statusText = { active: 'Assinatura ativa — pagante', past_due: 'Inadimplente', expired: 'Assinatura vencida', trialing: 'Em teste gratuito', paused: 'Assinatura pausada', canceled: 'Assinatura cancelada', without_subscription: 'Sem assinatura' }[customer.subscription_status] || 'Situação não informada';
+                    const clientCounts = `${Number(customer.total_clients || 0)} cliente(s): ${Number(customer.active_clients || 0)} ativo(s)/aprovado(s), ${Number(customer.inactive_clients || 0)} inativo(s)`;
+                    list.append(el('article', { className: 'record-row' }, [
+                        el('div', { className: 'record-main' }, [
+                            el('strong', { text: customer.name }),
+                            el('span', { text: `${customer.phone || 'Sem telefone'} • ${customer.address || 'Endereço não informado'}` }),
+                            el('span', { text: `Responsável: ${customer.owner_name || 'Não cadastrado'}` }),
+                            el('span', { className: 'record-detail email-detail', text: `E-mail de acesso: ${customer.owner_email || 'Não cadastrado'}` }),
+                            el('span', { text: `${customer.plan_name || 'Sem plano'} • ${period}` }),
+                            el('span', { className: 'record-detail', text: `${Number(customer.active_barbers || 0)} barbeiro(s) ativo(s) • ${clientCounts}` })
+                        ]),
+                        el('div', { className: 'record-secondary' }, [
+                            subscriptionPill(customer.subscription_status),
+                            el('span', { text: statusText }),
+                            button('Ver cadastro', 'button secondary small', () => {
+                                state.platformDetailId = Number(customer.id);
+                                state.platformSection = 'detail';
+                                renderApp();
+                            })
+                        ])
+                    ]));
+                    });
+                };
+                filters.forEach(([value, label]) => {
+                    const filterButton = button(label, 'filter-button', () => {
+                        state.platformCustomerFilter = value;
+                        filterBar.querySelectorAll('button').forEach((item) => item.setAttribute('aria-pressed', item === filterButton ? 'true' : 'false'));
+                        renderCustomerList();
+                    });
+                    filterButton.setAttribute('aria-pressed', state.platformCustomerFilter === value ? 'true' : 'false');
+                    filterBar.append(filterButton);
+                });
+                renderCustomerList();
+                customersSection.append(filterBar, list);
+                customersSection.append(el('p', { className: 'field-hint', text: 'Pagando e inadimplente referem-se à assinatura da barbearia. Pagamentos de cortes individuais não são registrados neste painel.' }));
+            }
+            const customerForm = el('form', { className: 'form-card', novalidate: true, autocomplete: 'off' });
+            const customerName = input('text', 'platform-customer-name', '', { required: true, maxlength: 180, placeholder: 'Nome da barbearia' });
+            const customerPhone = input('tel', 'platform-customer-phone', '', { maxlength: 40, placeholder: '(00) 00000-0000' });
+            const customerAddress = input('text', 'platform-customer-address', '', { maxlength: 255, placeholder: 'Cidade ou endereço' });
+            const ownerName = input('text', 'platform-owner-name', '', { required: true, maxlength: 160, placeholder: 'Nome do responsável' });
+            const ownerEmail = input('email', 'platform-owner-email', '', { required: true, maxlength: 190, placeholder: 'responsavel@exemplo.com' });
+            const ownerPassword = passwordControl('platform-owner-password', { required: true, minlength: 8, maxlength: 4096 });
+            const customerMessage = el('p', { className: 'form-message', role: 'alert', 'aria-live': 'polite' });
+            const customerSubmit = button('Cadastrar cliente comercial', 'button');
+            customerSubmit.type = 'submit';
+            customerForm.append(el('h3', { text: 'Novo cliente comercial' }), el('p', { text: 'Cria a barbearia, a conta do responsável e inicia automaticamente o teste de 30 dias.' }), el('div', { className: 'form-grid' }, [field('Nome da barbearia', customerName), field('Telefone', customerPhone), field('Endereço', customerAddress), field('Responsável', ownerName), field('E-mail de acesso', ownerEmail), field('Senha inicial', ownerPassword, 'Mínimo de 8 caracteres.')]), customerMessage, el('div', { className: 'form-actions' }, [customerSubmit]));
+            customerForm.addEventListener('submit', async (event) => {
+                event.preventDefault();
+                if (!customerForm.reportValidity() || customerSubmit.disabled) return;
+                setButtonBusy(customerSubmit, true, 'Cadastrando...');
+                try {
+                    await api('platform_customer_save', { method: 'POST', body: { name: customerName.value.trim(), phone: customerPhone.value.trim(), address: customerAddress.value.trim(), owner_name: ownerName.value.trim(), owner_email: ownerEmail.value.trim(), owner_password: ownerPassword.querySelector('input').value } });
+                    customerMessage.className = 'form-message success';
+                    customerMessage.textContent = 'Cliente comercial cadastrado e teste de 30 dias iniciado.';
+                    window.setTimeout(() => renderApp(), 650);
+                } catch (error) {
+                    customerMessage.className = 'form-message error';
+                    customerMessage.textContent = friendlyError(error);
+                } finally { setButtonBusy(customerSubmit, false); }
+            });
+            customersSection.append(customerForm);
+        } catch (error) {
+            customersSection.append(pageError(error, () => renderApp()));
+        }
+        content.append(customersSection);
+
+        const financeSection = el('section', { className: 'card section-card', hidden: sectionKey !== 'finance' }, [
+            el('h3', { text: 'Financeiro das assinaturas' }),
+            el('p', { className: 'section-description', text: 'Acompanhe quem está em teste, com assinatura ativa, inadimplente ou vencida. O status só representa pagamento confirmado quando chega pelo provedor.' })
+        ]);
+        financeSection.append(el('div', { className: 'stats-grid platform-stats' }, [
+            statCard('Assinaturas ativas', metrics.active_subscriptions),
+            statCard('Em teste', metrics.trialing),
+            statCard('Inadimplentes', metrics.past_due),
+            statCard('Vencidas', metrics.expired)
+        ]));
+        try {
+            const financeResult = await api('platform_customers');
+            const financeCustomers = Array.isArray(financeResult.customers) ? financeResult.customers : [];
+            const filters = [['all', 'Todas'], ['past_due', 'Inadimplentes'], ['active', 'Ativas'], ['trialing', 'Em teste'], ['expired', 'Vencidas']];
+            const filterBar = el('div', { className: 'filter-buttons', role: 'group', 'aria-label': 'Filtrar assinaturas por situação financeira' });
+            const list = el('div', { className: 'record-list' });
+            let selectedFilter = 'all';
+            const renderFinanceList = () => {
+                clear(list);
+                const rows = financeCustomers.filter((shop) => selectedFilter === 'all' || shop.subscription_status === selectedFilter);
+                if (!rows.length) {
+                    list.append(emptyState('Nenhuma barbearia neste status', 'Quando houver registros, eles aparecerão nesta lista.'));
+                    return;
+                }
+                rows.forEach((shop) => {
+                    const deadline = shop.subscription_status === 'trialing' ? shop.trial_ends_at : shop.current_period_end;
+                    const amount = shop.price_cents === null ? 'Preço do plano não informado' : `${formatBRL(shop.price_cents)} por ${shop.billing_interval === 'year' ? 'ano' : 'mês'}`;
+                    const statusText = { active: 'Assinatura ativa', past_due: 'Inadimplente — cobrança pendente', expired: 'Período de teste/assinatura vencido', trialing: 'Em teste gratuito', paused: 'Pausada', canceled: 'Cancelada', without_subscription: 'Sem assinatura' }[shop.subscription_status] || 'Situação não informada';
+                    list.append(el('article', { className: 'record-row' }, [
+                        el('div', { className: 'record-main' }, [
+                            el('strong', { text: shop.name }),
+                            el('span', { text: `Responsável: ${shop.owner_name || 'Não cadastrado'}` }),
+                            el('span', { className: 'record-detail email-detail', text: `E-mail de acesso: ${shop.owner_email || 'Não cadastrado'}` }),
+                            el('span', { className: 'record-detail', text: `${statusText} • ${amount}` }),
+                            el('span', { text: deadline ? `${shop.subscription_status === 'trialing' ? 'Fim do teste' : 'Próximo vencimento'}: ${formatUtcDateTime(deadline)}` : 'Sem vencimento informado' })
+                        ]),
+                        el('div', { className: 'record-secondary' }, [subscriptionPill(shop.subscription_status), button('Abrir cadastro', 'button secondary small', () => {
+                            state.platformDetailId = Number(shop.id);
+                            state.platformSection = 'detail';
+                            renderApp();
+                        })])
+                    ]));
+                });
+            };
+            filters.forEach(([value, label]) => {
+                const control = button(label, 'filter-button', () => {
+                    selectedFilter = value;
+                    filterBar.querySelectorAll('button').forEach((item) => item.setAttribute('aria-pressed', item === control ? 'true' : 'false'));
+                    renderFinanceList();
+                });
+                control.setAttribute('aria-pressed', value === selectedFilter ? 'true' : 'false');
+                filterBar.append(control);
+            });
+            renderFinanceList();
+            financeSection.append(filterBar, list, el('p', { className: 'field-hint', text: 'O valor acima é o preço cadastrado do plano, não um saldo de fatura. O sistema ainda não guarda extrato conciliado de cada pagamento; não tratamos assinatura ativa como comprovante de recebimento sem confirmação do provedor.' }));
+        } catch (error) {
+            financeSection.append(pageError(error, () => renderApp()));
+        }
+        content.append(financeSection);
+
+        const plansSection = el('section', { className: 'card section-card', hidden: sectionKey !== 'billing' }, [
+            el('h3', { text: 'Planos e checkout' }),
+            el('p', { className: 'section-description', text: 'A cobrança web será feita pelo Checkout do Asaas. A confirmação ficará dependente dos webhooks do servidor.' })
+        ]);
+        try {
+            const planResult = await api('platform_plans');
+            const configuredText = planResult.payment_configured
+                ? `Asaas ${planResult.environment === 'production' ? 'produção' : 'sandbox'} configurado.`
+                : 'Asaas ainda não configurado: nenhuma cobrança real será iniciada.';
+            plansSection.append(el('p', { className: planResult.payment_configured ? 'form-message success' : 'form-message', text: configuredText }));
+            const plans = Array.isArray(planResult.plans) ? planResult.plans : [];
+            if (!plans.length) {
+                plansSection.append(emptyState('Nenhum plano ativo', 'Cadastre o primeiro plano e seu preço antes de liberar o checkout.'));
+            } else {
+                const planGrid = el('div', { className: 'quick-actions' });
+                plans.forEach((plan) => {
+                    const price = plan.price_cents === null ? 'Preço não definido' : `${(plan.price_cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}/${plan.billing_interval === 'year' ? 'ano' : 'mês'}`;
+                    planGrid.append(el('div', { className: 'quick-action' }, [
+                        el('strong', { text: plan.name }),
+                        el('span', { text: price }),
+                        el('span', { text: plan.description || 'Plano recorrente da plataforma.' })
+                    ]));
+                });
+                plansSection.append(planGrid);
+            }
+            const planForm = el('form', { className: 'form-card', novalidate: true, autocomplete: 'off' });
+            const planName = input('text', 'platform-plan-name', '', { required: true, maxlength: 120, value: 'Plano 1 Real por Dia', placeholder: 'Plano 1 Real por Dia' });
+            const planCode = input('text', 'platform-plan-code', '', { required: true, maxlength: 64, pattern: '[a-z0-9][a-z0-9_-]{1,63}', value: 'um_real_por_dia', placeholder: 'um_real_por_dia' });
+            const planPrice = input('text', 'platform-plan-price', '', { required: true, inputmode: 'decimal', value: '30,00', placeholder: '30,00' });
+            const planInterval = selectInput('platform-plan-interval', { required: true });
+            addSelectOptions(planInterval, [{ id: 'month', name: 'Mensal' }, { id: 'year', name: 'Anual' }], null);
+            const planTrial = input('number', 'platform-plan-trial', '0', { required: true, min: 0, max: 30, step: 1 });
+            const planDescription = input('text', 'platform-plan-description', '', { maxlength: 500, value: 'Seu sistema completo por apenas R$ 1 por dia.', placeholder: 'Descrição mostrada no painel' });
+            const planMessage = el('p', { className: 'form-message', role: 'alert', 'aria-live': 'polite' });
+            const planSubmit = button('Cadastrar plano', 'button');
+            planSubmit.type = 'submit';
+            planForm.append(el('h3', { text: 'Novo plano' }), el('p', { text: 'O checkout só será liberado depois que o Asaas estiver configurado no servidor.' }), el('div', { className: 'form-grid' }, [field('Nome', planName), field('Código interno', planCode), field('Preço (R$)', planPrice), field('Periodicidade', planInterval), field('Dias de teste', planTrial), field('Descrição', planDescription)]), planMessage, el('div', { className: 'form-actions' }, [planSubmit]));
+            planForm.addEventListener('submit', async (event) => {
+                event.preventDefault();
+                if (!planForm.reportValidity() || planSubmit.disabled) return;
+                setButtonBusy(planSubmit, true, 'Salvando...');
+                planMessage.className = 'form-message';
+                try {
+                    await api('platform_plan_save', { method: 'POST', body: {
+                        name: planName.value.trim(), code: planCode.value.trim().toLowerCase(),
+                        price_cents: parseBRLCents(planPrice.value), billing_interval: planInterval.value,
+                        trial_days: Number(planTrial.value), description: planDescription.value.trim(), active: 1
+                    }});
+                    planMessage.className = 'form-message success';
+                    planMessage.textContent = 'Plano cadastrado.';
+                    window.setTimeout(() => renderApp(), 450);
+                } catch (error) {
+                    planMessage.className = 'form-message error';
+                    planMessage.textContent = friendlyError(error);
+                } finally { setButtonBusy(planSubmit, false); }
+            });
+            plansSection.append(planForm);
+            const shops = Array.isArray(planResult.barbershops) ? planResult.barbershops : [];
+            if (plans.length && shops.length) {
+                const checkoutForm = el('form', { className: 'form-card', novalidate: true, autocomplete: 'off' });
+                const checkoutShop = selectInput('platform-checkout-shop', { required: true });
+                addSelectOptions(checkoutShop, shops, 'Selecione a barbearia');
+                const checkoutPlan = selectInput('platform-checkout-plan', { required: true });
+                addSelectOptions(checkoutPlan, plans.map((plan) => ({ id: plan.id, name: `${plan.name} — R$ ${(plan.price_cents / 100).toFixed(2).replace('.', ',')}/${plan.billing_interval === 'year' ? 'ano' : 'mês'}` })), 'Selecione o plano');
+                const checkoutName = input('text', 'platform-checkout-name', '', { required: true, maxlength: 160, placeholder: 'Nome do responsável' });
+                const checkoutEmail = input('email', 'platform-checkout-email', '', { required: true, maxlength: 190, placeholder: 'responsavel@exemplo.com' });
+                const checkoutMessage = el('p', { className: 'form-message', role: 'alert', 'aria-live': 'polite' });
+                const checkoutSubmit = button('Gerar checkout Asaas', 'button secondary');
+                checkoutSubmit.type = 'submit';
+                checkoutForm.append(el('h3', { text: 'Gerar checkout' }), el('p', { text: 'O responsável será enviado ao checkout hospedado do Asaas. A cobrança só será confirmada por webhook.' }), el('div', { className: 'form-grid' }, [field('Barbearia', checkoutShop), field('Plano', checkoutPlan), field('Nome do responsável', checkoutName), field('E-mail do responsável', checkoutEmail)]), checkoutMessage, el('div', { className: 'form-actions' }, [checkoutSubmit]));
+                checkoutForm.addEventListener('submit', async (event) => {
+                    event.preventDefault();
+                    if (!checkoutForm.reportValidity() || checkoutSubmit.disabled) return;
+                    setButtonBusy(checkoutSubmit, true, 'Criando...');
+                    checkoutMessage.className = 'form-message';
+                    try {
+                        const checkout = await api('platform_checkout', { method: 'POST', body: {
+                            barbershop_id: Number(checkoutShop.value), plan_id: Number(checkoutPlan.value),
+                            customer_name: checkoutName.value.trim(), customer_email: checkoutEmail.value.trim()
+                        }});
+                        checkoutMessage.className = 'form-message success';
+                        checkoutMessage.textContent = 'Checkout criado. Abrindo a página do Asaas...';
+                        window.location.href = checkout.checkout_url;
+                    } catch (error) {
+                        checkoutMessage.className = 'form-message error';
+                        checkoutMessage.textContent = friendlyError(error);
+                    } finally { setButtonBusy(checkoutSubmit, false); }
+                });
+                plansSection.append(checkoutForm);
+            }
+        } catch (error) {
+            plansSection.append(pageError(error, () => renderApp()));
+        }
+        content.append(plansSection);
+
+        const detailSection = el('section', { className: 'card section-card', hidden: sectionKey !== 'detail' }, [
+            button('Voltar às barbearias', 'button secondary', () => { state.platformSection = 'shops'; renderApp(); })
+        ]);
+        if (sectionKey !== 'detail') {
+            content.append(detailSection);
+            return;
+        }
+        try {
+            if (!state.platformDetailId) throw new ApiError('invalid_barbershop', 422);
+            const detailResult = await api('platform_customer_details', { params: { barbershop_id: state.platformDetailId } });
+            const shop = detailResult.barbershop || {};
+            const amount = shop.price_cents === null || shop.price_cents === undefined ? 'Não definido' : `${formatBRL(shop.price_cents)} por ${shop.billing_interval === 'year' ? 'ano' : 'mês'}`;
+            detailSection.append(
+                el('h2', { text: shop.name || 'Barbearia' }),
+                el('div', { className: 'record-secondary' }, [subscriptionPill(shop.subscription_status), el('span', { text: shop.plan_name || 'Sem plano' })]),
+                button(state.platformEditingShop ? 'Cancelar edição' : 'Editar dados da barbearia', 'button secondary', () => {
+                    state.platformEditingShop = !state.platformEditingShop;
+                    renderApp();
+                })
+            );
+            if (state.platformEditingShop) {
+                const editForm = el('form', { className: 'form-card', novalidate: true, autocomplete: 'off' });
+                const editShopName = input('text', 'platform-edit-shop-name', shop.name || '', { required: true, maxlength: 180 });
+                const editPhone = input('tel', 'platform-edit-shop-phone', shop.phone || '', { maxlength: 40 });
+                const editAddress = input('text', 'platform-edit-shop-address', shop.address || '', { maxlength: 255 });
+                const editOwnerName = input('text', 'platform-edit-owner-name', shop.owner_name || '', { required: true, maxlength: 160 });
+                const editOwnerEmail = input('email', 'platform-edit-owner-email', shop.owner_email || '', { required: true, maxlength: 190 });
+                const editMessage = el('p', { className: 'form-message', role: 'alert', 'aria-live': 'polite' });
+                const editSubmit = button('Salvar alterações', 'button');
+                editSubmit.type = 'submit';
+                editForm.append(
+                    el('h3', { text: 'Editar barbearia e responsável' }),
+                    el('p', { className: 'section-description', text: 'Alterar o e-mail também altera o e-mail de acesso do responsável. Esta edição não altera a senha.' }),
+                    el('div', { className: 'form-grid' }, [
+                        field('Nome da barbearia', editShopName), field('Telefone', editPhone), field('Endereço', editAddress),
+                        field('Nome do responsável', editOwnerName), field('E-mail de acesso do responsável', editOwnerEmail)
+                    ]),
+                    editMessage,
+                    el('div', { className: 'form-actions' }, [editSubmit])
+                );
+                editForm.addEventListener('submit', async (event) => {
+                    event.preventDefault();
+                    if (!editForm.reportValidity() || editSubmit.disabled) return;
+                    setButtonBusy(editSubmit, true, 'Salvando...');
+                    editMessage.className = 'form-message';
+                    try {
+                        await api('platform_customer_update', { method: 'POST', body: {
+                            barbershop_id: Number(shop.id), name: editShopName.value.trim(), phone: editPhone.value.trim(),
+                            address: editAddress.value.trim(), owner_name: editOwnerName.value.trim(), owner_email: editOwnerEmail.value.trim()
+                        }});
+                        state.platformEditingShop = false;
+                        editMessage.className = 'form-message success';
+                        editMessage.textContent = 'Dados da barbearia atualizados.';
+                        window.setTimeout(() => renderApp(), 450);
+                    } catch (error) {
+                        editMessage.className = 'form-message error';
+                        editMessage.textContent = friendlyError(error);
+                    } finally { setButtonBusy(editSubmit, false); }
+                });
+                detailSection.append(editForm);
+            } else {
+                detailSection.append(el('div', { className: 'profile-details shop-detail-grid' }, [
+                    el('div', {}, [el('span', { text: 'Responsável' }), el('strong', { text: shop.owner_name || 'Não cadastrado' })]),
+                    el('div', { className: 'shop-detail-email' }, [el('span', { text: 'E-mail de acesso do responsável' }), el('strong', { text: shop.owner_email || 'E-mail não cadastrado' })]),
+                    el('div', {}, [el('span', { text: 'Telefone' }), el('strong', { text: shop.phone || 'Não informado' })]),
+                    el('div', {}, [el('span', { text: 'Endereço' }), el('strong', { text: shop.address || 'Não informado' })]),
+                    el('div', {}, [el('span', { text: 'Preço do plano' }), el('strong', { text: amount })]),
+                    el('div', {}, [el('span', { text: 'Início do teste' }), el('strong', { text: formatUtcDateTime(shop.trial_started_at) })]),
+                    el('div', {}, [el('span', { text: 'Fim do teste' }), el('strong', { text: formatUtcDateTime(shop.trial_ends_at) })]),
+                    el('div', {}, [el('span', { text: 'Fim do período atual' }), el('strong', { text: formatUtcDateTime(shop.current_period_end) })]),
+                    el('div', {}, [el('span', { text: 'Tolerância até' }), el('strong', { text: formatUtcDateTime(shop.grace_period_ends_at) })])
+                ]));
+            }
+            const users = Array.isArray(detailResult.users) ? detailResult.users : [];
+            const userList = el('div', { className: 'record-list' });
+            users.forEach((user) => userList.append(el('article', { className: 'record-row' }, [
+                el('div', { className: 'record-main' }, [el('strong', { text: user.name }), el('span', { text: user.email })]),
+                el('div', { className: 'record-secondary' }, [el('span', { text: roleLabel(user.role) }), el('span', { text: user.status === 'active' ? 'Ativo' : 'Inativo' })])
+            ])));
+            detailSection.append(el('h3', { text: 'Contas vinculadas' }), users.length ? userList : emptyState('Nenhuma conta vinculada', ''));
+        } catch (error) {
+            if (error instanceof ApiError && error.code === 'invalid_barbershop') detailSection.append(emptyState('Selecione uma barbearia', 'Volte à lista para abrir um cadastro.'));
+            else detailSection.append(pageError(error, () => renderApp()));
+        }
+        content.append(detailSection);
+    }
+
     async function renderHome(content) {
         const role = state.user.role;
         const result = await api('summary');
         const data = result.data || {};
         clear(content);
         if (role === 'admin') {
-            const actions = [button('Novo atendimento', 'button', () => navigate('agenda')), button('Gerenciar equipe', 'button secondary', () => navigate('team'))];
-            content.append(pageIntro('Dashboard', 'Acompanhe os dados reais da operação e acesse as áreas administrativas.', actions));
-            content.append(el('div', { className: 'stats-grid' }, [
-                statCard('Usuários ativos', data.users), statCard('Clientes ativos', data.clients), statCard('Barbeiros ativos', data.barbers), statCard('Atendimentos hoje', data.appointments)
+            content.append(pageIntro('Dashboard', 'Acompanhe clientes aprovados e inativos, e abra cada área pelos botões de acesso rápido.', [button('Novo atendimento', 'button', () => navigate('agenda'))]));
+            content.append(el('div', { className: 'stats-grid dashboard-stats' }, [
+                statCard('Clientes cadastrados', data.clients_total),
+                statCard('Clientes ativos/aprovados', data.clients_active ?? data.clients),
+                statCard('Clientes inativos', data.clients_inactive),
+                statCard('Barbeiros ativos', data.barbers),
+                statCard('Atendimentos hoje', data.appointments)
             ]));
             const quick = el('section', { className: 'card section-card' }, [
                 el('h3', { text: 'Acesso rápido' }),
-                el('p', { className: 'section-description', text: 'Abra uma tarefa operacional sem sair do painel.' }),
-                el('div', { className: 'quick-actions' }, [
-                    quickAction('Agenda por data', 'Consultar e atualizar atendimentos.', 'agenda'),
-                    quickAction('Clientes', 'Editar contas e status.', 'clients'),
-                    quickAction('Equipe', 'Gerenciar barbeiros.', 'team'),
-                    quickAction('Serviços', 'Manter duração e valores.', 'services')
+                el('p', { className: 'section-description', text: 'Toque em um botão para abrir a área desejada.' }),
+                el('div', { className: 'quick-actions dashboard-actions' }, [
+                    quickAction('Agenda', 'Consultar e atualizar atendimentos.', 'agenda', 'AG'),
+                    quickAction('Clientes', 'Ver, aprovar, editar e inativar clientes.', 'clients', 'CL'),
+                    quickAction('Equipe', 'Gerenciar barbeiros e seus acessos.', 'team', 'EQ'),
+                    quickAction('Serviços', 'Manter duração, valores e disponibilidade.', 'services', 'SV')
                 ])
             ]);
             content.append(quick);
+            const adminAppointments = Array.isArray(data.appointments_list) ? data.appointments_list : [];
+            const agendaSection = el('section', { className: 'card section-card dashboard-agenda-card' }, [
+                el('h3', { text: 'Agenda de hoje' }),
+                el('p', { className: 'section-description', text: 'Cartões somente dos atendimentos do dia que está sendo acompanhado.' })
+            ]);
+            agendaSection.append(adminAppointments.length ? el('div', { className: 'appointment-list' }, adminAppointments.map((item) => appointmentCard(item, 'admin'))) : emptyState('Nenhum atendimento hoje', 'Os novos agendamentos aparecerão aqui.'));
+            content.append(agendaSection);
             return;
         }
         if (role === 'barber') {
@@ -664,8 +1246,11 @@
         content.append(section);
     }
 
-    function quickAction(title, description, view) {
-        return el('button', { type: 'button', className: 'quick-action', onclick: () => navigate(view) }, [el('strong', { text: title }), el('span', { text: description })]);
+    function quickAction(title, description, view, symbol = '→') {
+        return el('button', { type: 'button', className: 'quick-action', onclick: () => navigate(view) }, [
+            el('span', { className: 'quick-action-symbol', 'aria-hidden': 'true', text: symbol }),
+            el('span', { className: 'quick-action-copy' }, [el('strong', { text: title }), el('span', { text: description })])
+        ]);
     }
 
     function appointmentCard(item, role) {
@@ -735,9 +1320,19 @@
         });
     }
 
+    function calendarEvent(item, role) {
+        const parsed = dateFromApi(item.starts_at);
+        const event = el('div', { className: `calendar-event ${item.status || 'pending'}` }, [
+            el('div', { className: 'calendar-time' }, [el('strong', { text: parsed.time || '—' }), el('span', { text: formatTime(item.ends_at) })]),
+            appointmentCard(item, role)
+        ]);
+        return event;
+    }
+
     async function renderAgenda(content) {
         const isAdmin = state.user.role === 'admin';
         const isBarber = state.user.role === 'barber';
+        const isClient = state.user.role === 'client';
         const date = state.agendaDate;
         let result;
         try {
@@ -749,8 +1344,8 @@
             return;
         }
         clear(content);
-        const newButton = isAdmin ? button('Novo atendimento', 'button') : null;
-        content.append(pageIntro('Agenda', isAdmin ? 'Consulte a operação por dia e crie novos atendimentos com horários disponíveis.' : 'Sua agenda própria, com os status autorizados para atualização.', newButton ? [newButton] : []));
+        const newButton = isAdmin || isBarber ? button('＋ Novo atendimento', 'button') : isClient ? button('＋ Agendar horário', 'button') : null;
+        content.append(pageIntro('Agenda', isAdmin ? 'Uma visão diária dos atendimentos da barbearia.' : isBarber ? 'Seus atendimentos organizados por horário.' : 'Seus horários confirmados e pendentes, organizados como uma agenda.', newButton ? [newButton] : []));
         const toolbar = el('div', { className: 'toolbar' });
         const dateInput = input('date', 'agenda-date', date, { max: '', 'aria-label': 'Data da agenda' });
         const dateGroup = el('div', { className: 'date-toolbar' }, [
@@ -764,25 +1359,32 @@
         toolbar.append(dateGroup);
         content.append(toolbar);
         const appointments = Array.isArray(result.appointments) ? result.appointments : [];
-        const list = el('section', { className: 'appointment-list', 'aria-label': 'Atendimentos do dia' });
-        if (!appointments.length) list.append(emptyState('Nenhum atendimento nesta data', 'Não há registros reais para o dia escolhido.'));
-        else appointments.forEach((item) => list.append(appointmentCard(item, isAdmin ? 'admin' : 'barber')));
-        content.append(list);
+        const calendar = el('section', { className: 'calendar-day', 'aria-label': `Agenda de ${displayDate(date, true)}` }, [
+            el('div', { className: 'calendar-day-heading' }, [
+                el('div', { className: 'calendar-date-badge' }, [el('span', { text: new Intl.DateTimeFormat('pt-BR', { weekday: 'short', timeZone: 'UTC' }).format(new Date(`${date}T12:00:00Z`)).replace('.', '') }), el('strong', { text: date.slice(8, 10) })]),
+                el('div', {}, [el('strong', { text: displayDate(date, true) }), el('span', { text: appointments.length ? `${appointments.length} atendimento(s)` : 'Nenhum evento agendado' })])
+            ])
+        ]);
+        if (!appointments.length) calendar.append(emptyState('Nenhum atendimento nesta data', isClient ? 'Toque em “Agendar horário” para criar seu próximo horário.' : 'Não há registros reais para o dia escolhido.'));
+        else appointments.forEach((item) => calendar.append(calendarEvent(item, isClient ? 'client' : isAdmin ? 'admin' : 'barber')));
+        content.append(calendar);
         wireStatusButtons(content);
-        if (isAdmin) {
-            const panel = el('section', { id: 'admin-booking-panel', className: 'card form-card', hidden: true });
+        if (isAdmin || isBarber) {
+            const panel = el('section', { id: 'staff-booking-panel', className: 'card form-card', hidden: true });
             content.append(panel);
             if (newButton) newButton.addEventListener('click', () => {
                 if (panel.hidden) {
                     panel.hidden = false;
                     newButton.textContent = 'Fechar novo atendimento';
-                    renderAdminBookingForm(panel, date);
+                    renderAdminBookingForm(panel, date, isAdmin);
                     panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 } else {
                     panel.hidden = true;
                     newButton.textContent = 'Novo atendimento';
                 }
             });
+        } else if (isClient && newButton) {
+            newButton.addEventListener('click', () => navigate('booking'));
         }
     }
 
@@ -791,25 +1393,25 @@
         if (panel) panel.hidden = !panel.hidden;
     }
 
-    async function renderAdminBookingForm(panel, date) {
+    async function renderAdminBookingForm(panel, date, admin = true) {
         clear(panel);
         panel.append(el('h3', { text: 'Novo atendimento' }), el('p', { text: 'Selecione cliente, barbeiro, serviço e um horário retornado pela disponibilidade real.' }), el('div', { className: 'form-message', text: 'Carregando opções...' }));
         try {
             const [clientsResult, barbersResult, servicesResult] = await Promise.all([
                 api('users', { params: { role: 'client' } }),
-                api('users', { params: { role: 'barber' } }),
+                admin ? api('users', { params: { role: 'barber' } }) : Promise.resolve({ users: [] }),
                 api('services')
             ]);
             buildBookingForm(panel, {
                 admin: true,
                 date,
                 clients: (clientsResult.users || []).filter((item) => item.status === 'active'),
-                barbers: (barbersResult.users || []).filter((item) => item.status === 'active'),
+                barbers: admin ? (barbersResult.users || []).filter((item) => item.status === 'active') : [state.user],
                 services: (servicesResult.services || []).filter((item) => Number(item.active) === 1)
             });
         } catch (error) {
             clear(panel);
-            panel.append(el('h3', { text: 'Novo atendimento' }), pageError(error, () => renderAdminBookingForm(panel, date)));
+            panel.append(el('h3', { text: 'Novo atendimento' }), pageError(error, () => renderAdminBookingForm(panel, date, admin)));
         }
     }
 
@@ -836,21 +1438,30 @@
         const form = el('form', { className: 'auth-form', novalidate: true });
         const dateInput = input('date', 'booking-date', options.date || saoPauloToday(), { required: true, min: saoPauloToday() });
         const barberSelect = selectInput('booking-barber', { required: true });
-        const serviceSelect = selectInput('booking-service', { required: true });
+        const serviceSelect = selectInput('booking-service', { required: true, multiple: true, size: 4 });
+        serviceSelect.setAttribute('aria-label', 'Selecione um ou mais serviços');
+        const barberSearch = input('search', 'booking-barber-search', '', { placeholder: 'Buscar por nome', autocomplete: 'off' });
+        const serviceSearch = input('search', 'booking-service-search', '', { placeholder: 'Buscar serviço', autocomplete: 'off' });
         const slotSelect = selectInput('booking-slot', { required: true, disabled: true });
         const notes = el('textarea', { id: 'booking-notes', maxlength: 500, placeholder: 'Opcional, até 500 caracteres' });
         addSelectOptions(barberSelect, options.barbers, 'Selecione o barbeiro');
         addSelectOptions(serviceSelect, options.services, 'Selecione o serviço');
+        bindSearchToSelect(barberSearch, barberSelect, options.barbers, ['name']);
+        bindSearchToSelect(serviceSearch, serviceSelect, options.services, ['name', 'description']);
         clear(slotSelect);
         slotSelect.appendChild(el('option', { value: '', text: 'Escolha barbeiro e serviço primeiro' }));
         const clientSelect = options.admin ? selectInput('booking-client', { required: true }) : null;
-        if (clientSelect) addSelectOptions(clientSelect, options.clients, 'Selecione o cliente');
+        const clientSearch = options.admin ? input('search', 'booking-client-search', '', { placeholder: 'Nome, WhatsApp ou e-mail', autocomplete: 'off' }) : null;
+        if (clientSelect) {
+            addSelectOptions(clientSelect, options.clients, 'Selecione o cliente');
+            bindSearchToSelect(clientSearch, clientSelect, options.clients, ['name', 'phone', 'email']);
+        }
         const message = el('p', { className: 'form-message', role: 'status', 'aria-live': 'polite' });
         const submit = button('Confirmar agendamento', 'button');
         submit.type = 'submit';
         const grid = el('div', { className: 'form-grid three' });
-        if (clientSelect) grid.append(field('Cliente', clientSelect));
-        grid.append(field('Data', dateInput), field('Barbeiro', barberSelect), field('Serviço', serviceSelect), field('Horário disponível', slotSelect), field('Observações', notes));
+        if (clientSelect) grid.append(field('Buscar cliente', clientSearch), field('Cliente', clientSelect));
+        grid.append(field('Data', dateInput), field('Buscar barbeiro', barberSearch), field('Barbeiro', barberSelect), field('Buscar serviço', serviceSearch), field('Serviços (selecione um ou mais)', serviceSelect), field('Horário disponível', slotSelect), field('Observações', notes));
         form.append(grid, message, el('div', { className: 'form-actions' }, [submit]));
         panel.append(el('h3', { text: options.admin ? 'Novo atendimento' : 'Agendar para mim' }), el('p', { text: options.admin ? 'O horário abaixo será consultado na API antes do salvamento.' : 'Escolha uma opção de horário retornada pela agenda.' }), form);
 
@@ -860,23 +1471,29 @@
             slotSelect.appendChild(el('option', { value: '', text: 'Consultando horários...' }));
             message.className = 'form-message';
             message.textContent = '';
-            if (!dateInput.value || !barberSelect.value || !serviceSelect.value) {
+            const selectedServiceIds = Array.from(serviceSelect.selectedOptions).map((option) => option.value).filter(Boolean);
+            if (!dateInput.value || !barberSelect.value || !selectedServiceIds.length) {
                 clear(slotSelect);
                 slotSelect.appendChild(el('option', { value: '', text: 'Escolha data, barbeiro e serviço' }));
                 return;
             }
             try {
-                const result = await api('availability', { params: { date: dateInput.value, barber_id: barberSelect.value, service_id: serviceSelect.value } });
+                const result = await api('availability', { params: { date: dateInput.value, barber_id: barberSelect.value, service_ids: selectedServiceIds.join(',') } });
                 clear(slotSelect);
                 const slots = Array.isArray(result.slots) ? result.slots : [];
-                slotSelect.appendChild(el('option', { value: '', text: slots.length ? 'Selecione o horário' : 'Nenhum horário disponível' }));
+                const busySlots = Array.isArray(result.busy_slots) ? result.busy_slots : [];
+                slotSelect.appendChild(el('option', { value: '', text: slots.length ? 'Selecione o horário' : busySlots.length ? 'Todos os horários estão ocupados' : 'Nenhum horário disponível' }));
                 slots.forEach((slot) => {
                     const option = el('option', { value: slot.starts_at, text: `${formatTime(slot.starts_at)} – ${formatTime(slot.ends_at)}` });
                     option.dataset.endsAt = slot.ends_at;
                     slotSelect.appendChild(option);
                 });
-                slotSelect.disabled = !slots.length;
-                if (!slots.length) message.textContent = 'Não há horários livres para esta combinação.';
+                busySlots.forEach((slot) => {
+                    slotSelect.appendChild(el('option', { value: `busy:${slot.starts_at}`, text: `${formatTime(slot.starts_at)} – ${formatTime(slot.ends_at)} · Ocupado`, disabled: true }));
+                });
+                slotSelect.disabled = !slots.length && !busySlots.length;
+                if (!slots.length) message.textContent = busySlots.length ? 'Todos os horários listados estão ocupados. Escolha outra data ou barbeiro.' : 'Não há horários livres para esta combinação.';
+                else if (busySlots.length) message.textContent = 'Os horários ocupados aparecem desabilitados.';
             } catch (error) {
                 clear(slotSelect);
                 slotSelect.appendChild(el('option', { value: '', text: 'Não foi possível carregar horários' }));
@@ -896,7 +1513,8 @@
             }
             const body = {
                 barber_id: Number(barberSelect.value),
-                service_id: Number(serviceSelect.value),
+                service_id: Number(Array.from(serviceSelect.selectedOptions)[0].value),
+                service_ids: Array.from(serviceSelect.selectedOptions).map((option) => Number(option.value)),
                 starts_at: selected.value,
                 ends_at: selected.dataset.endsAt,
                 notes: notes.value.trim()
@@ -915,6 +1533,7 @@
                     navigate('history');
                 }
             } catch (error) {
+                if (error instanceof ApiError && error.code === 'appointment_conflict') await refreshSlots();
                 message.className = 'form-message error';
                 message.textContent = friendlyError(error);
             } finally {
@@ -947,7 +1566,7 @@
         }
         const users = Array.isArray(result.users) ? result.users : [];
         clear(content);
-        content.append(pageIntro(title, description, [button(role === 'client' ? 'Novo cliente' : 'Novo barbeiro', 'button', () => { state.editingUser = null; renderPeopleContent(content, role, users); })]));
+        content.append(pageIntro(title, description, [button(role === 'client' ? 'Novo cliente' : 'Novo barbeiro', 'button', () => { state.editingUser = null; state.whatsappInvite = null; renderPeopleContent(content, role, users); })]));
         renderPeopleContent(content, role, users, true);
     }
 
@@ -957,7 +1576,9 @@
         const editing = state.editingUser && state.editingUser.role === role ? state.editingUser : null;
         const form = userForm(role, editing, async () => {
             try {
-                const result = await api('user_save', { method: 'POST', body: collectUserPayload(role, editing, form) });
+                const payload = collectUserPayload(role, editing, form);
+                const result = await api('user_save', { method: 'POST', body: payload });
+                if (!editing && role === 'client') state.whatsappInvite = { name: result.user.name, phone: result.user.phone || payload.phone, password: payload.password };
                 state.editingUser = null;
                 showToast(editing ? 'Cadastro atualizado.' : 'Cadastro criado.');
                 const fresh = await api('users', { params: { role } });
@@ -984,7 +1605,7 @@
                 } catch (error) { showToast(friendlyError(error), 'error'); setButtonBusy(toggle, false); }
             });
             records.append(el('article', { className: 'record-card' }, [
-                el('div', { className: 'record-primary' }, [el('strong', { text: user.name }), el('small', { text: user.email })]),
+                el('div', { className: 'record-primary' }, [el('strong', { text: user.name }), el('small', { text: role === 'client' && user.phone ? user.phone : user.email })]),
                 el('div', { className: 'record-secondary' }, [statusPill(user.status), edit, toggle])
             ]));
         });
@@ -994,22 +1615,37 @@
         if (!replaceListOnly) return;
     }
 
+    function whatsappInviteCard(invite) {
+        const digits = String(invite.phone || '').replace(/\D/g, '');
+        const loginUrl = new URL(window.location.href);
+        loginUrl.search = '?view=login';
+        loginUrl.hash = '';
+        const text = `Olá ${invite.name}! Seu acesso à Barber Shop está pronto.\n\nAcesse: ${loginUrl.toString()}\nWhatsApp: ${invite.phone}\nSenha: ${invite.password}\n\nGuarde esses dados com segurança.`;
+        const link = `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
+        return el('div', { className: 'whatsapp-invite' }, [
+            el('strong', { text: 'Cliente cadastrado com sucesso' }),
+            el('p', { text: 'Envie agora o link de acesso e a senha pelo WhatsApp.' }),
+            el('a', { className: 'button block', href: link, target: '_blank', rel: 'noopener', text: 'Enviar acesso pelo WhatsApp' })
+        ]);
+    }
+
     function userForm(role, editing, onSubmit) {
-        const form = el('form', { className: 'card form-card', novalidate: true });
+        const form = el('form', { className: 'card form-card', novalidate: true, autocomplete: 'off' });
         const name = input('text', 'user-name-input', editing ? editing.name : '', { maxlength: 160, required: true, autocomplete: 'name', placeholder: 'Nome completo' });
-        const email = input('email', 'user-email-input', editing ? editing.email : '', { maxlength: 190, required: true, autocomplete: 'email', placeholder: 'email@exemplo.com' });
+        const phone = input('tel', 'user-phone-input', editing ? (editing.phone || '') : '', { maxlength: 20, required: role === 'client', autocomplete: 'tel', placeholder: '(00) 00000-0000' });
+        const email = input('email', 'user-email-input', editing ? editing.email : '', { maxlength: 190, required: role !== 'client', autocomplete: 'email', placeholder: 'email@exemplo.com' });
         const status = selectInput('user-status-input', { required: true });
         addSelectOptions(status, [{ id: 'active', name: 'Ativo' }, { id: 'inactive', name: 'Inativo' }], null);
         status.value = editing ? editing.status : 'active';
-        const password = input('password', 'user-password-input', '', { maxlength: 4096, autocomplete: editing ? 'new-password' : 'new-password', minlength: 8, required: !editing, placeholder: editing ? 'Deixe em branco para manter' : 'Mínimo de 8 caracteres' });
+        const password = passwordControl('user-password-input', { maxlength: 4096, minlength: 8, required: !editing, placeholder: editing ? 'Deixe em branco para manter' : 'Mínimo de 8 caracteres' });
         const message = el('p', { className: 'form-message', role: 'alert', 'aria-live': 'polite' });
         const submit = button(editing ? 'Salvar alterações' : `Cadastrar ${role === 'client' ? 'cliente' : 'barbeiro'}`, 'button');
         submit.type = 'submit';
-        form.append(el('h3', { text: editing ? 'Editar cadastro' : `Novo ${role === 'client' ? 'cliente' : 'barbeiro'}` }), el('p', { text: editing ? 'A senha é opcional na edição.' : 'A senha inicial precisa ter no mínimo 8 caracteres.' }), el('div', { className: 'form-grid' }, [field('Nome completo', name), field('E-mail', email), field('Status', status), field('Senha', password, editing ? 'Opcional na edição.' : 'Obrigatória, mínimo de 8 caracteres.')]), message, el('div', { className: 'form-actions' }, [submit, editing ? button('Cancelar edição', 'button secondary', () => { state.editingUser = null; renderApp(); }) : null]));
+        form.append(el('h3', { text: editing ? 'Editar cadastro' : `Novo ${role === 'client' ? 'cliente' : 'barbeiro'}` }), el('p', { text: editing ? 'A senha é opcional na edição.' : 'A senha inicial precisa ter no mínimo 8 caracteres.' }), el('div', { className: 'form-grid' }, [field('Nome completo', name), role === 'client' ? field('WhatsApp/telefone', phone) : field('E-mail', email), role === 'client' ? null : field('Status', status), role === 'client' ? field('Status', status) : null, field('Senha', password, editing ? 'Opcional na edição.' : 'Obrigatória, mínimo de 8 caracteres.')]), message, state.whatsappInvite && role === 'client' ? whatsappInviteCard(state.whatsappInvite) : null, el('div', { className: 'form-actions' }, [submit, editing ? button('Cancelar edição', 'button secondary', () => { state.editingUser = null; state.whatsappInvite = null; renderApp(); }) : null]));
         form.addEventListener('submit', async (event) => {
             event.preventDefault();
             if (!form.reportValidity() || submit.disabled) return;
-            if (!editing && password.value.length < 8) { message.className = 'form-message error'; message.textContent = 'A senha precisa ter no mínimo 8 caracteres.'; return; }
+            if (!editing && password.querySelector('input').value.length < 8) { message.className = 'form-message error'; message.textContent = 'A senha precisa ter no mínimo 8 caracteres.'; return; }
             setButtonBusy(submit, true, 'Salvando...');
             try {
                 await onSubmit();
@@ -1023,10 +1659,11 @@
     function collectUserPayload(role, editing, form) {
         const payload = {
             name: form.querySelector('#user-name-input').value.trim(),
-            email: form.querySelector('#user-email-input').value.trim(),
             role,
             status: form.querySelector('#user-status-input').value
         };
+        if (role === 'client') payload.phone = form.querySelector('#user-phone-input').value.trim();
+        else payload.email = form.querySelector('#user-email-input').value.trim();
         const password = form.querySelector('#user-password-input').value;
         if (password) payload.password = password;
         if (editing) payload.id = Number(editing.id);
@@ -1140,10 +1777,10 @@
     async function renderAccount(content) {
         clear(content);
         const user = state.user;
-        const passwordForm = el('form', { className: 'card form-card', novalidate: true });
-        const current = input('password', 'current-password', '', { autocomplete: 'current-password', required: true, maxlength: 4096 });
-        const next = input('password', 'new-password', '', { autocomplete: 'new-password', required: true, minlength: 8, maxlength: 4096 });
-        const confirm = input('password', 'new-password-confirm', '', { autocomplete: 'new-password', required: true, minlength: 8, maxlength: 4096 });
+        const passwordForm = el('form', { className: 'card form-card', novalidate: true, autocomplete: 'off' });
+        const current = passwordControl('current-password', { required: true, maxlength: 4096 });
+        const next = passwordControl('new-password', { required: true, minlength: 8, maxlength: 4096 });
+        const confirm = passwordControl('new-password-confirm', { required: true, minlength: 8, maxlength: 4096 });
         const message = el('p', { className: 'form-message', role: 'alert', 'aria-live': 'polite' });
         const submit = button('Alterar senha', 'button');
         submit.type = 'submit';
@@ -1151,11 +1788,14 @@
         passwordForm.addEventListener('submit', async (event) => {
             event.preventDefault();
             if (!passwordForm.reportValidity() || submit.disabled) return;
-            if (next.value !== confirm.value) { message.className = 'form-message error'; message.textContent = 'As senhas não coincidem.'; return; }
+            const currentValue = current.querySelector('input').value;
+            const nextValue = next.querySelector('input').value;
+            const confirmValue = confirm.querySelector('input').value;
+            if (nextValue !== confirmValue) { message.className = 'form-message error'; message.textContent = 'As senhas não coincidem.'; return; }
             setButtonBusy(submit, true, 'Salvando...');
             try {
-                const result = await api('change_password', { method: 'POST', body: { current_password: current.value, new_password: next.value, new_password_confirm: confirm.value } });
-                current.value = ''; next.value = ''; confirm.value = '';
+                const result = await api('change_password', { method: 'POST', body: { current_password: currentValue, new_password: nextValue, new_password_confirm: confirmValue } });
+                current.querySelector('input').value = ''; next.querySelector('input').value = ''; confirm.querySelector('input').value = '';
                 if (result.require_login) {
                     state.user = null;
                     navigate('login', true);

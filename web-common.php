@@ -55,15 +55,26 @@ function webConfig(): array
     }
     $loaded = true;
     $path = __DIR__ . '/config.php';
-    if (!is_file($path)) {
-        return $config;
+    if (is_file($path)) {
+        try {
+            $value = require $path;
+            $config = is_array($value) ? $value : [];
+        } catch (Throwable) {
+            $config = [];
+        }
     }
-    try {
-        $value = require $path;
-    } catch (Throwable) {
-        return $config;
+    $mailPath = __DIR__ . '/mail.local.php';
+    if (is_file($mailPath)) {
+        try {
+            $mailValue = require $mailPath;
+            if (is_array($mailValue)) {
+                $config['mail'] = array_merge(is_array($config['mail'] ?? null) ? $config['mail'] : [], $mailValue);
+            }
+        } catch (Throwable) {
+            // Keep the public configuration usable when the private mail file is unavailable.
+        }
     }
-    return $config = is_array($value) ? $value : [];
+    return $config;
 }
 
 function webRequestIsHttps(): bool
@@ -196,6 +207,8 @@ function webSafeUser(array $user): array
         'email' => (string)($user['email'] ?? ''),
         'role' => (string)($user['role'] ?? ''),
         'status' => (string)($user['status'] ?? ''),
+        'platform_admin' => (int)($user['platform_admin'] ?? 0) === 1,
+        'barbershop_id' => isset($user['barbershop_id']) && $user['barbershop_id'] !== null ? (int)$user['barbershop_id'] : null,
     ];
 }
 
@@ -241,7 +254,7 @@ function webOpenDatabase(): array
 function webStoredSessionUser(PDO $pdo, string $prefix, string $token): ?array
 {
     ensureSessions($pdo, $prefix);
-    $stmt = $pdo->prepare("SELECT u.id, u.name, u.email, u.role, u.status
+    $stmt = $pdo->prepare("SELECT u.id, u.name, u.email, u.role, u.status, u.platform_admin, u.barbershop_id
         FROM `{$prefix}sessions` s
         INNER JOIN `{$prefix}users` u ON u.id = s.user_id
         WHERE s.token_hash = ? AND s.expires_at > UTC_TIMESTAMP() AND u.status = 'active'
@@ -440,14 +453,11 @@ function webMailTestPath(): ?string
 
 function webMailEnabled(): bool
 {
-    if (webMailTestPath() !== null) {
-        return true;
-    }
+    if (webMailTestPath() !== null) return true;
     $config = webConfig();
-    if (($config['mail']['enabled'] ?? true) === false) {
-        return false;
-    }
-    return function_exists('mail') && webMailFrom() !== null;
+    if (($config['mail']['enabled'] ?? true) === false) return false;
+    $mail = is_array($config['mail'] ?? null) ? $config['mail'] : [];
+    return webMailFrom() !== null && (trim((string)($mail['smtp_host'] ?? '')) !== '' || function_exists('mail'));
 }
 
 function webResetLink(string $token): ?string
@@ -457,6 +467,80 @@ function webResetLink(string $token): ?string
         return null;
     }
     return $base . '/index.php?view=reset#token=' . rawurlencode($token);
+}
+
+function webMailLog(array $entry): void
+{
+    $entry['at'] = gmdate('c');
+    unset($entry['password'], $entry['smtp_password']);
+    $line = json_encode($entry, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+    if ($line !== false) { @file_put_contents(__DIR__ . '/mail-debug.log', $line . "\n", FILE_APPEND | LOCK_EX); @chmod(__DIR__ . '/mail-debug.log', 0600); }
+}
+function webSmtpTest(string $recipient, bool $send = true): array
+{
+    $config = webConfig(); $mail = is_array($config['mail'] ?? null) ? $config['mail'] : [];
+    $host = trim((string)($mail['smtp_host'] ?? '')); $user = trim((string)($mail['smtp_username'] ?? '')); $pass = (string)($mail['smtp_password'] ?? '');
+    $port = (int)($mail['smtp_port'] ?? 465); $secure = strtolower(trim((string)($mail['smtp_secure'] ?? 'ssl')));
+    $result = ['ok' => false, 'recipient' => $recipient, 'host' => $host, 'port' => $port, 'secure' => strtoupper($secure), 'stages' => []];
+    $stage = static function (array &$result, string $name, string $status, string $detail = ''): void { $result['stages'][] = ['name' => $name, 'status' => $status, 'detail' => $detail]; };
+    if ($host === '' || $user === '' || $pass === '') { $stage($result, 'configuração', 'erro', 'Host, usuário ou senha SMTP ausente.'); webMailLog(['event'=>'smtp_test','result'=>$result]); return $result; }
+    if (!filter_var($recipient, FILTER_VALIDATE_EMAIL)) { $stage($result, 'destinatário', 'erro', 'E-mail de teste inválido.'); webMailLog(['event'=>'smtp_test','result'=>$result]); return $result; }
+    $remote = ($secure === 'ssl' ? 'ssl://' : '') . $host . ':' . $port;
+    $errno = 0; $errstr = ''; $socket = @stream_socket_client($remote, $errno, $errstr, 15, STREAM_CLIENT_CONNECT);
+    if (!is_resource($socket)) { $stage($result, 'conexão', 'erro', 'Não foi possível conectar ao servidor SMTP.'); webMailLog(['event'=>'smtp_test','result'=>$result,'errno'=>$errno]); return $result; }
+    stream_set_timeout($socket, 15);
+    $read = static function () use ($socket): string { $out=''; while (($line=fgets($socket,515))!==false) { $out.=$line; if (isset($line[3]) && $line[3]===' ') break; } return $out; };
+    $code = static function (string $reply): string { return preg_match('/^([0-9]{3})/m', $reply, $m) ? $m[1] : 'sem resposta'; };
+    $write = static function (string $command) use ($socket): void { fwrite($socket, $command."\r\n"); };
+    $reply=$read(); if (!str_starts_with($code($reply), '2')) { $stage($result,'saudação','erro','Servidor respondeu código '.$code($reply).'.'); fclose($socket); webMailLog(['event'=>'smtp_test','result'=>$result]); return $result; }
+    $stage($result,'conexão','ok','Servidor SMTP respondeu.');
+    $domain = parse_url(webTrustedBaseUrl() ?: 'https://localhost', PHP_URL_HOST) ?: 'localhost'; $write('EHLO '.$domain); $reply=$read();
+    if (!str_starts_with($code($reply), '2')) { $stage($result,'EHLO','erro','Servidor respondeu código '.$code($reply).'.'); fclose($socket); webMailLog(['event'=>'smtp_test','result'=>$result]); return $result; }
+    $stage($result,'EHLO','ok','Servidor aceitou a identificação.');
+    if ($secure === 'tls') { $write('STARTTLS'); $reply=$read(); if (!str_starts_with($code($reply),'2') || !@stream_socket_enable_crypto($socket,true,STREAM_CRYPTO_METHOD_TLS_CLIENT)) { $stage($result,'TLS','erro','Não foi possível ativar TLS.'); fclose($socket); webMailLog(['event'=>'smtp_test','result'=>$result]); return $result; } $write('EHLO '.$domain); $read(); }
+    $write('AUTH LOGIN'); $reply=$read(); if ($code($reply)!=='334') { $stage($result,'autenticação','erro','Servidor não aceitou AUTH LOGIN (código '.$code($reply).').'); fclose($socket); webMailLog(['event'=>'smtp_test','result'=>$result]); return $result; }
+    $write(base64_encode($user)); $reply=$read(); if ($code($reply)!=='334') { $stage($result,'autenticação','erro','Usuário SMTP recusado (código '.$code($reply).').'); fclose($socket); webMailLog(['event'=>'smtp_test','result'=>$result]); return $result; }
+    $write(base64_encode($pass)); $reply=$read(); if ($code($reply)!=='235') { $stage($result,'autenticação','erro','Senha SMTP recusada ou conta bloqueada (código '.$code($reply).').'); fclose($socket); webMailLog(['event'=>'smtp_test','result'=>$result]); return $result; }
+    $stage($result,'autenticação','ok','Usuário e senha aceitos pelo servidor.');
+    if ($send) {
+        $from=webMailFrom(); $write('MAIL FROM:<'.$from.'>'); $reply=$read(); if (!str_starts_with($code($reply),'2')) { $stage($result,'remetente','erro','Remetente recusado (código '.$code($reply).').'); fclose($socket); webMailLog(['event'=>'smtp_test','result'=>$result]); return $result; }
+        $write('RCPT TO:<'.$recipient.'>'); $reply=$read(); if (!str_starts_with($code($reply),'2')) { $stage($result,'destinatário','erro','Destinatário recusado (código '.$code($reply).').'); fclose($socket); webMailLog(['event'=>'smtp_test','result'=>$result]); return $result; }
+        $stage($result,'destinatário','ok','Destinatário aceito.'); $write('DATA'); $reply=$read(); if ($code($reply)!=='354') { $stage($result,'mensagem','erro','Servidor não aceitou o conteúdo (código '.$code($reply).').'); fclose($socket); webMailLog(['event'=>'smtp_test','result'=>$result]); return $result; }
+        $from=webMailFrom() ?: $user; $subject='Teste SMTP - Barber Shop'; $body='Este é um teste de envio SMTP do Barber Shop. Se você recebeu esta mensagem, o SMTP está funcionando.'; $payload='From: '.$from."\r\nTo: ".$recipient."\r\nSubject: ".$subject."\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n".$body; fwrite($socket,$payload."\r\n.\r\n"); $reply=$read(); if (!str_starts_with($code($reply),'2')) { $stage($result,'mensagem','erro','Servidor recusou a mensagem (código '.$code($reply).').'); fclose($socket); webMailLog(['event'=>'smtp_test','result'=>$result]); return $result; }
+        $stage($result,'mensagem','ok','Mensagem aceita para entrega.');
+    }
+    fclose($socket); $result['ok']=true; webMailLog(['event'=>'smtp_test','result'=>$result]); return $result;
+}
+
+function webSmtpSend(string $recipient, string $subject, string $body): bool
+{
+    $config = webConfig(); $mail = is_array($config['mail'] ?? null) ? $config['mail'] : [];
+    $host = trim((string)($mail['smtp_host'] ?? '')); $user = trim((string)($mail['smtp_username'] ?? '')); $pass = (string)($mail['smtp_password'] ?? '');
+    $port = (int)($mail['smtp_port'] ?? 465); $secure = strtolower(trim((string)($mail['smtp_secure'] ?? 'ssl')));
+    if ($host === '' || $user === '' || $pass === '' || !in_array($secure, ['ssl', 'tls'], true)) return false;
+    $remote = ($secure === 'ssl' ? 'ssl://' : '') . $host . ':' . $port;
+    $socket = @stream_socket_client($remote, $errno, $errstr, 12, STREAM_CLIENT_CONNECT);
+    if (!is_resource($socket)) return false;
+    stream_set_timeout($socket, 12);
+    $read = static function () use ($socket): string { $out = ''; while (($line = fgets($socket, 515)) !== false) { $out .= $line; if (isset($line[3]) && $line[3] === ' ') break; } return $out; };
+    $send = static function (string $command) use ($socket, $read): bool { fwrite($socket, $command . "\r\n"); $reply = $read(); return preg_match('/^[245][0-9]{2}/m', $reply) === 1; };
+    $greeting = $read();
+    if (!preg_match('/^2[0-9]{2}/m', $greeting)) { fclose($socket); return false; }
+    $domain = parse_url(webTrustedBaseUrl() ?: 'https://localhost', PHP_URL_HOST) ?: 'localhost';
+    if (!$send('EHLO ' . $domain)) { fclose($socket); return false; }
+    if ($secure === 'tls') { if (!$send('STARTTLS') || !@stream_socket_enable_crypto($socket, true, STREAM_CRYPTO_METHOD_TLS_CLIENT) || !$send('EHLO ' . $domain)) { fclose($socket); return false; } }
+    fwrite($socket, 'AUTH LOGIN\r\n');
+    if (preg_match('/^334/m', $read()) !== 1) { fclose($socket); return false; }
+    fwrite($socket, base64_encode($user) . "\r\n");
+    if (preg_match('/^334/m', $read()) !== 1) { fclose($socket); return false; }
+    fwrite($socket, base64_encode($pass) . "\r\n");
+    if (preg_match('/^235/m', $read()) !== 1) { fclose($socket); return false; }
+    $from = webMailFrom(); if ($from === null || !$send('MAIL FROM:<' . $from . '>') || !$send('RCPT TO:<' . $recipient . '>') || !$send('DATA')) { fclose($socket); return false; }
+    $safeSubject = '=?UTF-8?B?' . base64_encode($subject) . '?=';
+    $headers = 'From: ' . $from . "\r\n" . 'To: ' . $recipient . "\r\n" . 'Subject: ' . $safeSubject . "\r\n" . 'Content-Type: text/plain; charset=UTF-8\r\n' . 'Content-Transfer-Encoding: 8bit\r\n';
+    $payload = preg_replace('/\r?\n/', "\r\n", $headers . "\r\n" . $body) ?? ($headers . "\r\n" . $body);
+    $payload = preg_replace('/^\./m', '..', $payload) ?? $payload;
+    fwrite($socket, $payload . "\r\n.\r\n"); $accepted = preg_match('/^2[0-9]{2}/m', $read()) === 1; $send('QUIT'); fclose($socket); return $accepted;
 }
 
 function webSendResetMail(string $recipient, string $token, string $name): bool
@@ -490,6 +574,13 @@ function webSendResetMail(string $recipient, string $token, string $name): bool
             return false;
         }
         return @file_put_contents($testPath, $record . "\n", FILE_APPEND | LOCK_EX) !== false;
+    }
+    $mail = webConfig()['mail'] ?? [];
+    if (is_array($mail) && trim((string)($mail['smtp_host'] ?? '')) !== '') {
+        if (webSmtpSend($recipient, $subject, $body)) return true;
+        webMailLog(['event' => 'password_reset_delivery_failed', 'recipient_domain' => substr(strrchr($recipient, '@') ?: '', 1)]);
+        // Some shared hosting plans expose SMTP intermittently but still provide
+        // the local mail transport. Try it before reporting failure.
     }
     $headers = 'From: ' . $from . "\r\nContent-Type: text/plain; charset=UTF-8\r\n";
     return @mail($recipient, $subject, $body, $headers);

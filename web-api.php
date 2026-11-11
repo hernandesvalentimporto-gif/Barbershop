@@ -53,21 +53,22 @@ function webHandleLogin(): never
     webSessionClose();
 
     $data = webReadJsonBody();
-    $email = is_string($data['email'] ?? null) ? strtolower(trim((string)$data['email'])) : '';
+    $identifier = is_string($data['identifier'] ?? null) ? trim((string)$data['identifier']) : (is_string($data['email'] ?? null) ? trim((string)$data['email']) : '');
+    $email = filter_var($identifier, FILTER_VALIDATE_EMAIL) !== false ? strtolower($identifier) : '';
+    $phone = $email === '' ? apiNormalizePhone($identifier) : null;
     $password = is_string($data['password'] ?? null) ? (string)$data['password'] : '';
-    if ($email === '' || strlen($email) > 190 || filter_var($email, FILTER_VALIDATE_EMAIL) === false
-        || $password === '' || strlen($password) > 4096) {
+    if (($email === '' && $phone === null) || $password === '' || strlen($password) > 4096) {
         webError('invalid_credentials', 422);
     }
 
-    if (!webRateLimitAllowed('login', [$email, webClientIdentifier()], 8, 900)) {
+    if (!webRateLimitAllowed('login', [$identifier, webClientIdentifier()], 8, 900)) {
         webError('rate_limited', 429);
     }
 
     [$pdo, $prefix] = webOpenDatabase();
-    $stmt = $pdo->prepare("SELECT id, name, email, password_hash, role, status
-        FROM `{$prefix}users` WHERE email = ? LIMIT 1");
-    $stmt->execute([$email]);
+    $stmt = $pdo->prepare("SELECT id, name, email, phone, password_hash, role, status, platform_admin, barbershop_id
+        FROM `{$prefix}users` WHERE (email = ? OR phone = ?) LIMIT 1");
+    $stmt->execute([$email !== '' ? $email : '__no_email__', $phone]);
     $user = $stmt->fetch();
     if (!is_array($user) || (string)$user['status'] !== 'active'
         || !password_verify($password, (string)$user['password_hash'])) {
@@ -84,6 +85,479 @@ function webHandleLogin(): never
     $csrf = webSetAuthenticatedSession($apiToken, $safeUser);
     webSessionClose();
     webJsonResponse(['ok' => true, 'user' => $safeUser, 'csrf' => $csrf]);
+}
+
+function webHandlePlatformDashboard(): never
+{
+    webRequireMethod('GET');
+    $context = webAuthenticatedContext();
+    if (!(bool)($context['user']['platform_admin'] ?? false)) {
+        webError('forbidden', 403);
+    }
+    $pdo = $context['pdo'];
+    $prefix = $context['prefix'];
+    $table = $prefix . 'subscriptions';
+    $exists = $pdo->prepare('SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?');
+    $exists->execute([$table]);
+    if ((int)$exists->fetchColumn() !== 1) {
+        webError('billing_not_ready', 503);
+    }
+    $pdo->exec("UPDATE `{$table}` SET status = 'expired'
+        WHERE status = 'trialing' AND trial_ends_at IS NOT NULL AND trial_ends_at <= UTC_TIMESTAMP()");
+
+    $scalar = static function (PDO $pdo, string $sql): int {
+        return (int)$pdo->query($sql)->fetchColumn();
+    };
+    $metrics = [
+        'barbershops' => $scalar($pdo, "SELECT COUNT(*) FROM `{$prefix}barbershops`"),
+        'active_barbers' => $scalar($pdo, "SELECT COUNT(*) FROM `{$prefix}users` WHERE role = 'barber' AND status = 'active'"),
+        'active_clients' => $scalar($pdo, "SELECT COUNT(*) FROM `{$prefix}users` WHERE role = 'client' AND status = 'active'"),
+        'total_clients' => $scalar($pdo, "SELECT COUNT(*) FROM `{$prefix}users` WHERE role = 'client'"),
+        'inactive_clients' => $scalar($pdo, "SELECT COUNT(*) FROM `{$prefix}users` WHERE role = 'client' AND status = 'inactive'"),
+        'trialing' => $scalar($pdo, "SELECT COUNT(*) FROM `{$table}` WHERE status = 'trialing' AND (trial_ends_at IS NULL OR trial_ends_at > UTC_TIMESTAMP())"),
+        'active_subscriptions' => $scalar($pdo, "SELECT COUNT(*) FROM `{$table}` WHERE status = 'active'"),
+        'past_due' => $scalar($pdo, "SELECT COUNT(*) FROM `{$table}` WHERE status = 'past_due'"),
+        'expired' => $scalar($pdo, "SELECT COUNT(*) FROM `{$table}` WHERE status = 'expired' OR (status = 'trialing' AND trial_ends_at <= UTC_TIMESTAMP())"),
+    ];
+
+    $statusStmt = $pdo->query("SELECT status, COUNT(*) AS total FROM `{$table}` GROUP BY status ORDER BY status");
+    $statusCounts = [];
+    foreach ($statusStmt->fetchAll() as $row) {
+        $statusCounts[(string)$row['status']] = (int)$row['total'];
+    }
+
+    $trialStmt = $pdo->query("SELECT s.id, s.barbershop_id, b.name AS barbershop_name,
+            s.status, s.trial_started_at, s.trial_ends_at, s.current_period_end,
+            p.code AS plan_code, p.name AS plan_name
+        FROM `{$table}` s
+        LEFT JOIN `{$prefix}barbershops` b ON b.id = s.barbershop_id
+        LEFT JOIN `{$prefix}plans` p ON p.id = s.plan_id
+        WHERE s.status IN ('trialing','past_due')
+        ORDER BY COALESCE(s.trial_ends_at, s.current_period_end) ASC, s.id ASC LIMIT 25");
+    $upcoming = [];
+    foreach ($trialStmt->fetchAll() as $row) {
+        $upcoming[] = [
+            'id' => (int)$row['id'],
+            'barbershop_id' => (int)$row['barbershop_id'],
+            'barbershop_name' => (string)($row['barbershop_name'] ?? 'Barbearia sem nome'),
+            'status' => (string)$row['status'],
+            'trial_started_at' => $row['trial_started_at'],
+            'trial_ends_at' => $row['trial_ends_at'],
+            'current_period_end' => $row['current_period_end'],
+            'plan_code' => $row['plan_code'],
+            'plan_name' => $row['plan_name'],
+        ];
+    }
+    $recentStmt = $pdo->query("SELECT b.id, b.name, b.created_at, s.status AS subscription_status
+        FROM `{$prefix}barbershops` b
+        LEFT JOIN `{$table}` s ON s.id = (
+            SELECT s2.id FROM `{$table}` s2 WHERE s2.barbershop_id = b.id ORDER BY s2.id DESC LIMIT 1
+        )
+        ORDER BY b.created_at DESC, b.id DESC LIMIT 5");
+    $recentSignups = [];
+    foreach ($recentStmt->fetchAll() as $row) {
+        $recentSignups[] = [
+            'id' => (int)$row['id'],
+            'name' => (string)$row['name'],
+            'created_at' => $row['created_at'],
+            'subscription_status' => $row['subscription_status'] === null ? 'without_subscription' : (string)$row['subscription_status'],
+        ];
+    }
+    webJsonResponse(['ok' => true, 'metrics' => $metrics, 'status_counts' => $statusCounts, 'upcoming' => $upcoming, 'recent_signups' => $recentSignups]);
+}
+
+function webHandlePlatformPlans(): never
+{
+    webRequireMethod('GET');
+    $context = webAuthenticatedContext();
+    if (!(bool)($context['user']['platform_admin'] ?? false)) {
+        webError('forbidden', 403);
+    }
+    $pdo = $context['pdo'];
+    $prefix = $context['prefix'];
+    $table = $prefix . 'plans';
+    $exists = $pdo->prepare('SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?');
+    $exists->execute([$table]);
+    if ((int)$exists->fetchColumn() !== 1) {
+        webError('billing_not_ready', 503);
+    }
+    $plans = [];
+    foreach ($pdo->query("SELECT id, code, name, description, price_cents, billing_interval, trial_days
+        FROM `{$table}` WHERE active = 1 ORDER BY price_cents IS NULL, price_cents, id") as $row) {
+        $plans[] = [
+            'id' => (int)$row['id'],
+            'code' => (string)$row['code'],
+            'name' => (string)$row['name'],
+            'description' => $row['description'],
+            'price_cents' => $row['price_cents'] === null ? null : (int)$row['price_cents'],
+            'billing_interval' => (string)$row['billing_interval'],
+            'trial_days' => (int)$row['trial_days'],
+        ];
+    }
+    $barbershops = [];
+    foreach ($pdo->query("SELECT id, name FROM `{$prefix}barbershops` ORDER BY name, id") as $row) {
+        $barbershops[] = ['id' => (int)$row['id'], 'name' => (string)$row['name']];
+    }
+    $payment = webConfig()['payment'] ?? [];
+    $apiKey = trim((string)($payment['api_key'] ?? ''));
+    $webhookToken = trim((string)($payment['webhook_token'] ?? ''));
+    $configured = $apiKey !== '' && !str_contains($apiKey, 'PREENCHA_')
+        && $webhookToken !== '' && !str_contains($webhookToken, 'GERE_');
+    webJsonResponse([
+        'ok' => true,
+        'provider' => (string)($payment['provider'] ?? 'asaas'),
+        'environment' => (string)($payment['environment'] ?? 'sandbox'),
+        'payment_configured' => $configured,
+        'plans' => $plans,
+        'barbershops' => $barbershops,
+    ]);
+}
+
+function webHandlePlatformCustomers(): never
+{
+    webRequireMethod('GET');
+    $context = webAuthenticatedContext();
+    if (!(bool)($context['user']['platform_admin'] ?? false)) {
+        webError('forbidden', 403);
+    }
+    $pdo = $context['pdo'];
+    $prefix = $context['prefix'];
+    $sql = "SELECT b.id, b.name, b.phone, b.address, b.created_at,
+            (SELECT u.name FROM `{$prefix}users` u WHERE u.barbershop_id = b.id AND u.role = 'admin' AND u.platform_admin = 0 ORDER BY u.id LIMIT 1) AS owner_name,
+            (SELECT u.email FROM `{$prefix}users` u WHERE u.barbershop_id = b.id AND u.role = 'admin' AND u.platform_admin = 0 ORDER BY u.id LIMIT 1) AS owner_email,
+            s.status AS subscription_status, s.trial_ends_at, s.current_period_end,
+            p.name AS plan_name, p.price_cents,
+            (SELECT COUNT(*) FROM `{$prefix}users` WHERE barbershop_id = b.id AND role = 'barber' AND status = 'active') AS active_barbers,
+            (SELECT COUNT(*) FROM `{$prefix}users` WHERE barbershop_id = b.id AND role = 'client') AS total_clients,
+            (SELECT COUNT(*) FROM `{$prefix}users` WHERE barbershop_id = b.id AND role = 'client' AND status = 'active') AS active_clients,
+            (SELECT COUNT(*) FROM `{$prefix}users` WHERE barbershop_id = b.id AND role = 'client' AND status = 'inactive') AS inactive_clients
+        FROM `{$prefix}barbershops` b
+        LEFT JOIN `{$prefix}subscriptions` s ON s.id = (
+            SELECT s2.id FROM `{$prefix}subscriptions` s2 WHERE s2.barbershop_id = b.id ORDER BY s2.id DESC LIMIT 1
+        )
+        LEFT JOIN `{$prefix}plans` p ON p.id = s.plan_id
+        ORDER BY b.created_at DESC, b.id DESC";
+    $customers = [];
+    foreach ($pdo->query($sql) as $row) {
+        $customers[] = [
+            'id' => (int)$row['id'],
+            'name' => (string)$row['name'],
+            'phone' => $row['phone'] === null ? null : (string)$row['phone'],
+            'address' => $row['address'] === null ? null : (string)$row['address'],
+            'created_at' => $row['created_at'],
+            'owner_name' => $row['owner_name'] === null ? null : (string)$row['owner_name'],
+            'owner_email' => $row['owner_email'] === null ? null : (string)$row['owner_email'],
+            'subscription_status' => $row['subscription_status'] === null ? 'without_subscription' : (string)$row['subscription_status'],
+            'trial_ends_at' => $row['trial_ends_at'],
+            'current_period_end' => $row['current_period_end'],
+            'plan_name' => $row['plan_name'],
+            'price_cents' => $row['price_cents'] === null ? null : (int)$row['price_cents'],
+            'active_barbers' => (int)$row['active_barbers'],
+            'total_clients' => (int)$row['total_clients'],
+            'active_clients' => (int)$row['active_clients'],
+            'inactive_clients' => (int)$row['inactive_clients'],
+            'counts_scope' => 'barbershop',
+        ];
+    }
+    webJsonResponse(['ok' => true, 'customers' => $customers]);
+}
+
+function webHandlePlatformCustomerDetails(): never
+{
+    webRequireMethod('GET');
+    $context = webAuthenticatedContext();
+    if (!(bool)($context['user']['platform_admin'] ?? false)) {
+        webError('forbidden', 403);
+    }
+    $shopId = filter_var($_GET['barbershop_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+    if ($shopId === false) {
+        webError('invalid_barbershop', 422);
+    }
+    $pdo = $context['pdo'];
+    $prefix = $context['prefix'];
+    $shopStmt = $pdo->prepare("SELECT b.id, b.name, b.phone, b.address, b.created_at,
+            (SELECT u.name FROM `{$prefix}users` u WHERE u.barbershop_id = b.id AND u.role = 'admin' AND u.platform_admin = 0 ORDER BY u.id LIMIT 1) AS owner_name,
+            (SELECT u.email FROM `{$prefix}users` u WHERE u.barbershop_id = b.id AND u.role = 'admin' AND u.platform_admin = 0 ORDER BY u.id LIMIT 1) AS owner_email,
+            s.status AS subscription_status, s.trial_started_at, s.trial_ends_at, s.current_period_start, s.current_period_end, s.grace_period_ends_at,
+            p.name AS plan_name, p.price_cents, p.billing_interval
+        FROM `{$prefix}barbershops` b
+        LEFT JOIN `{$prefix}subscriptions` s ON s.id = (SELECT s2.id FROM `{$prefix}subscriptions` s2 WHERE s2.barbershop_id = b.id ORDER BY s2.id DESC LIMIT 1)
+        LEFT JOIN `{$prefix}plans` p ON p.id = s.plan_id
+        WHERE b.id = ? LIMIT 1");
+    $shopStmt->execute([$shopId]);
+    $shop = $shopStmt->fetch();
+    if (!is_array($shop)) {
+        webError('barbershop_not_found', 404);
+    }
+    $userStmt = $pdo->prepare("SELECT id, name, email, role, status, created_at FROM `{$prefix}users`
+        WHERE barbershop_id = ? AND role IN ('admin','barber','client') ORDER BY FIELD(role,'admin','barber','client'), name, id");
+    $userStmt->execute([$shopId]);
+    $users = [];
+    foreach ($userStmt->fetchAll() as $user) {
+        $users[] = [
+            'id' => (int)$user['id'], 'name' => (string)$user['name'], 'email' => (string)$user['email'],
+            'role' => (string)$user['role'], 'status' => (string)$user['status'], 'created_at' => $user['created_at'],
+        ];
+    }
+    webJsonResponse(['ok' => true, 'barbershop' => [
+        'id' => (int)$shop['id'], 'name' => (string)$shop['name'],
+        'phone' => $shop['phone'] === null ? null : (string)$shop['phone'],
+        'address' => $shop['address'] === null ? null : (string)$shop['address'],
+        'created_at' => $shop['created_at'], 'owner_name' => $shop['owner_name'], 'owner_email' => $shop['owner_email'],
+        'subscription_status' => $shop['subscription_status'] === null ? 'without_subscription' : (string)$shop['subscription_status'],
+        'trial_started_at' => $shop['trial_started_at'], 'trial_ends_at' => $shop['trial_ends_at'],
+        'current_period_start' => $shop['current_period_start'], 'current_period_end' => $shop['current_period_end'],
+        'grace_period_ends_at' => $shop['grace_period_ends_at'], 'plan_name' => $shop['plan_name'],
+        'price_cents' => $shop['price_cents'] === null ? null : (int)$shop['price_cents'],
+        'billing_interval' => $shop['billing_interval'],
+    ], 'users' => $users]);
+}
+
+function webHandlePlatformCustomerUpdate(): never
+{
+    webRequireMethod('POST');
+    $context = webAuthenticatedContext(true);
+    if (!(bool)($context['user']['platform_admin'] ?? false)) {
+        webError('forbidden', 403);
+    }
+    $data = webReadJsonBody();
+    $shopId = filter_var($data['barbershop_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+    $name = is_string($data['name'] ?? null) ? trim($data['name']) : '';
+    $phone = is_string($data['phone'] ?? null) ? trim($data['phone']) : '';
+    $address = is_string($data['address'] ?? null) ? trim($data['address']) : '';
+    $ownerName = is_string($data['owner_name'] ?? null) ? trim($data['owner_name']) : '';
+    $ownerEmail = is_string($data['owner_email'] ?? null) ? strtolower(trim($data['owner_email'])) : '';
+    if ($shopId === false || $name === '' || strlen($name) > 180 || strlen($phone) > 40 || strlen($address) > 255
+        || $ownerName === '' || strlen($ownerName) > 160 || strlen($ownerEmail) > 190
+        || filter_var($ownerEmail, FILTER_VALIDATE_EMAIL) === false) {
+        webError('invalid_platform_customer_update', 422);
+    }
+    $pdo = $context['pdo'];
+    $prefix = $context['prefix'];
+    try {
+        $pdo->beginTransaction();
+        $shopStmt = $pdo->prepare("SELECT id FROM `{$prefix}barbershops` WHERE id = ? LIMIT 1 FOR UPDATE");
+        $shopStmt->execute([$shopId]);
+        if (!$shopStmt->fetch()) {
+            $pdo->rollBack();
+            webError('barbershop_not_found', 404);
+        }
+        $ownerStmt = $pdo->prepare("SELECT id, email FROM `{$prefix}users`
+            WHERE barbershop_id = ? AND role = 'admin' AND platform_admin = 0 ORDER BY id LIMIT 1 FOR UPDATE");
+        $ownerStmt->execute([$shopId]);
+        $owner = $ownerStmt->fetch();
+        if (!is_array($owner)) {
+            $pdo->rollBack();
+            webError('platform_owner_not_found', 409);
+        }
+        $ownerId = (int)$owner['id'];
+        $emailStmt = $pdo->prepare("SELECT id FROM `{$prefix}users` WHERE email = ? AND id <> ? LIMIT 1");
+        $emailStmt->execute([$ownerEmail, $ownerId]);
+        if ($emailStmt->fetch()) {
+            $pdo->rollBack();
+            webError('email_already_exists', 409);
+        }
+        $shopUpdate = $pdo->prepare("UPDATE `{$prefix}barbershops` SET name = ?, phone = ?, address = ? WHERE id = ?");
+        $shopUpdate->execute([$name, $phone !== '' ? $phone : null, $address !== '' ? $address : null, $shopId]);
+        $ownerUpdate = $pdo->prepare("UPDATE `{$prefix}users` SET name = ?, email = ? WHERE id = ? AND barbershop_id = ? AND role = 'admin' AND platform_admin = 0");
+        $ownerUpdate->execute([$ownerName, $ownerEmail, $ownerId, $shopId]);
+        if (strcasecmp((string)$owner['email'], $ownerEmail) !== 0) {
+            $revoke = $pdo->prepare("DELETE FROM `{$prefix}sessions` WHERE user_id = ?");
+            $revoke->execute([$ownerId]);
+        }
+        $pdo->commit();
+    } catch (Throwable $exception) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        throw $exception;
+    }
+    webJsonResponse(['ok' => true, 'barbershop_id' => (int)$shopId]);
+}
+
+function webHandlePlatformCustomerSave(): never
+{
+    webRequireMethod('POST');
+    $context = webAuthenticatedContext(true);
+    if (!(bool)($context['user']['platform_admin'] ?? false)) {
+        webError('forbidden', 403);
+    }
+    $data = webReadJsonBody();
+    $name = is_string($data['name'] ?? null) ? trim($data['name']) : '';
+    $phone = is_string($data['phone'] ?? null) ? trim($data['phone']) : '';
+    $address = is_string($data['address'] ?? null) ? trim($data['address']) : '';
+    $ownerName = is_string($data['owner_name'] ?? null) ? trim($data['owner_name']) : '';
+    $ownerEmail = is_string($data['owner_email'] ?? null) ? strtolower(trim($data['owner_email'])) : '';
+    $ownerPassword = is_string($data['owner_password'] ?? null) ? $data['owner_password'] : '';
+    if ($name === '' || strlen($name) > 180 || strlen($phone) > 40 || strlen($address) > 255
+        || $ownerName === '' || strlen($ownerName) > 160 || filter_var($ownerEmail, FILTER_VALIDATE_EMAIL) === false
+        || strlen($ownerEmail) > 190 || strlen($ownerPassword) < 8 || strlen($ownerPassword) > 4096) {
+        webError('invalid_platform_customer', 422);
+    }
+    $pdo = $context['pdo'];
+    $prefix = $context['prefix'];
+    try {
+        $pdo->beginTransaction();
+        $check = $pdo->prepare("SELECT id FROM `{$prefix}users` WHERE email = ? LIMIT 1");
+        $check->execute([$ownerEmail]);
+        if ($check->fetch()) {
+            $pdo->rollBack();
+            webError('email_already_exists', 409);
+        }
+        $shop = $pdo->prepare("INSERT INTO `{$prefix}barbershops` (name, phone, address) VALUES (?, ?, ?)");
+        $shop->execute([$name, $phone !== '' ? $phone : null, $address !== '' ? $address : null]);
+        $barbershopId = (int)$pdo->lastInsertId();
+        $owner = $pdo->prepare("INSERT INTO `{$prefix}users` (barbershop_id, name, email, password_hash, role, status, platform_admin) VALUES (?, ?, ?, ?, 'admin', 'active', 0)");
+        $owner->execute([$barbershopId, $ownerName, $ownerEmail, password_hash($ownerPassword, PASSWORD_DEFAULT)]);
+        $trial = $pdo->prepare("INSERT INTO `{$prefix}subscriptions` (barbershop_id, status, trial_started_at, trial_ends_at) VALUES (?, 'trialing', UTC_TIMESTAMP(), DATE_ADD(UTC_TIMESTAMP(), INTERVAL 30 DAY))");
+        $trial->execute([$barbershopId]);
+        $pdo->commit();
+        webJsonResponse(['ok' => true, 'barbershop_id' => $barbershopId], 201);
+    } catch (Throwable $exception) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        throw $exception;
+    }
+}
+
+function webHandlePlatformPlanSave(): never
+{
+    webRequireMethod('POST');
+    $context = webAuthenticatedContext(true);
+    if (!(bool)($context['user']['platform_admin'] ?? false)) {
+        webError('forbidden', 403);
+    }
+    $data = webReadJsonBody();
+    $id = filter_var($data['id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) ?: null;
+    $code = is_string($data['code'] ?? null) ? strtolower(trim($data['code'])) : '';
+    $name = is_string($data['name'] ?? null) ? trim($data['name']) : '';
+    $description = is_string($data['description'] ?? null) ? trim($data['description']) : '';
+    $interval = is_string($data['billing_interval'] ?? null) ? $data['billing_interval'] : 'month';
+    $price = filter_var($data['price_cents'] ?? null, FILTER_VALIDATE_INT);
+    $trialDays = filter_var($data['trial_days'] ?? 0, FILTER_VALIDATE_INT);
+    $active = !empty($data['active']) ? 1 : 0;
+    if (preg_match('/^[a-z0-9][a-z0-9_-]{1,63}$/', $code) !== 1 || $name === '' || strlen($name) > 120
+        || strlen($description) > 500 || !in_array($interval, ['month', 'year'], true)
+        || $price === false || $price < 1 || $price > 2147483647 || $trialDays === false || $trialDays < 0 || $trialDays > 30) {
+        webError('invalid_plan', 422);
+    }
+    $pdo = $context['pdo'];
+    $prefix = $context['prefix'];
+    try {
+        if ($id !== null) {
+            $stmt = $pdo->prepare("UPDATE `{$prefix}plans`
+                SET code = ?, name = ?, description = ?, price_cents = ?, billing_interval = ?, trial_days = ?, active = ?
+                WHERE id = ?");
+            $stmt->execute([$code, $name, $description !== '' ? $description : null, $price, $interval, $trialDays, $active, $id]);
+        } else {
+            $stmt = $pdo->prepare("INSERT INTO `{$prefix}plans`
+                (code, name, description, price_cents, billing_interval, trial_days, active)
+                VALUES (?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([$code, $name, $description !== '' ? $description : null, $price, $interval, $trialDays, $active]);
+            $id = (int)$pdo->lastInsertId();
+        }
+    } catch (PDOException $exception) {
+        if ((string)($exception->errorInfo[0] ?? '') === '23000') {
+            webError('plan_code_exists', 409);
+        }
+        throw $exception;
+    }
+    webJsonResponse(['ok' => true, 'id' => $id]);
+}
+
+function webHandlePlatformCheckout(): never
+{
+    webRequireMethod('POST');
+    $context = webAuthenticatedContext(true);
+    if (!(bool)($context['user']['platform_admin'] ?? false)) {
+        webError('forbidden', 403);
+    }
+    $data = webReadJsonBody();
+    $barbershopId = filter_var($data['barbershop_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+    $planId = filter_var($data['plan_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+    $customerName = is_string($data['customer_name'] ?? null) ? trim($data['customer_name']) : '';
+    $customerEmail = is_string($data['customer_email'] ?? null) ? strtolower(trim($data['customer_email'])) : '';
+    if ($barbershopId === false || $planId === false || $customerName === '' || strlen($customerName) > 160
+        || strlen($customerEmail) > 190 || filter_var($customerEmail, FILTER_VALIDATE_EMAIL) === false) {
+        webError('invalid_checkout_request', 422);
+    }
+    $config = webConfig();
+    $payment = $config['payment'] ?? [];
+    $apiKey = trim((string)($payment['api_key'] ?? ''));
+    if ($apiKey === '' || str_contains($apiKey, 'PREENCHA_')) {
+        webError('payment_not_configured', 503);
+    }
+    $baseUrl = webTrustedBaseUrl();
+    if ($baseUrl === null) {
+        webError('payment_not_configured', 503);
+    }
+    $pdo = $context['pdo'];
+    $prefix = $context['prefix'];
+    $planStmt = $pdo->prepare("SELECT id, name, description, price_cents, billing_interval, trial_days
+        FROM `{$prefix}plans` WHERE id = ? AND active = 1 LIMIT 1");
+    $planStmt->execute([$planId]);
+    $plan = $planStmt->fetch();
+    if (!is_array($plan) || (int)$plan['price_cents'] < 1) {
+        webError('invalid_plan', 422);
+    }
+    $shopStmt = $pdo->prepare("SELECT id FROM `{$prefix}barbershops` WHERE id = ? LIMIT 1");
+    $shopStmt->execute([$barbershopId]);
+    if (!is_array($shopStmt->fetch())) {
+        webError('barbershop_not_found', 404);
+    }
+    $cycle = (string)$plan['billing_interval'] === 'year' ? 'YEARLY' : 'MONTHLY';
+    $due = new DateTimeImmutable('now', new DateTimeZone('America/Sao_Paulo'));
+    $trialDays = max(0, (int)$plan['trial_days']);
+    if ($trialDays > 0) {
+        $due = $due->modify('+' . $trialDays . ' days');
+    }
+    $payload = [
+        'billingTypes' => ['CREDIT_CARD'],
+        'chargeTypes' => ['RECURRENT'],
+        'minutesToExpire' => 1440,
+        'callback' => [
+            'successUrl' => $baseUrl . '/?view=account&payment=success',
+            'cancelUrl' => $baseUrl . '/?view=account&payment=cancelled',
+            'expiredUrl' => $baseUrl . '/?view=account&payment=expired',
+        ],
+        'items' => [[
+            'name' => (string)$plan['name'],
+            'description' => (string)($plan['description'] ?: 'Assinatura Barber Shop'),
+            'quantity' => 1,
+            'value' => ((int)$plan['price_cents']) / 100,
+        ]],
+        'subscription' => [
+            'cycle' => $cycle,
+            'nextDueDate' => $due->format('Y-m-d H:i:s'),
+        ],
+        'customerData' => [
+            'name' => $customerName,
+            'email' => $customerEmail,
+        ],
+    ];
+    $ch = curl_init(rtrim((string)($payment['base_url'] ?? 'https://api-sandbox.asaas.com'), '/') . '/v3/checkouts');
+    if ($ch === false) {
+        webError('payment_provider_error', 502);
+    }
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 20,
+        CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'access_token: ' . $apiKey],
+        CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+    ]);
+    $response = curl_exec($ch);
+    $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    $responseData = is_string($response) ? json_decode($response, true) : null;
+    $checkoutId = is_array($responseData) && is_string($responseData['id'] ?? null) ? trim($responseData['id']) : '';
+    if ($httpCode < 200 || $httpCode >= 300 || $checkoutId === '') {
+        webError('payment_provider_error', 502);
+    }
+    $checkoutBase = rtrim((string)($payment['checkout_base_url'] ?? 'https://asaas.com'), '/');
+    $checkoutUrl = $checkoutBase . '/checkoutSession/show?id=' . rawurlencode($checkoutId);
+    $update = $pdo->prepare("UPDATE `{$prefix}subscriptions`
+        SET plan_id = ?, provider = 'asaas', provider_checkout_id = ?, provider_checkout_url = ?
+        WHERE barbershop_id = ? AND status IN ('trialing','active','past_due')");
+    $update->execute([$planId, $checkoutId, $checkoutUrl, $barbershopId]);
+    webJsonResponse(['ok' => true, 'checkout_url' => $checkoutUrl]);
 }
 
 function webHandleLogout(): never
@@ -212,9 +686,11 @@ function webHandleForgotPassword(): never
         throw $exception;
     }
 
+    $deliveryFailed = false;
     if ($token !== null && $tokenHash !== null && $recipient !== null) {
         $sent = webSendResetMail($recipient, $token, $name);
         if (!$sent) {
+            $deliveryFailed = true;
             // Do not leave a usable token when the configured transport failed.
             $delete = $pdo->prepare("DELETE FROM `{$prefix}password_resets`
                 WHERE token_hash = ? AND used_at IS NULL");
@@ -223,6 +699,7 @@ function webHandleForgotPassword(): never
     }
     // The opaque token is never included in the JSON response or application log.
     unset($token, $tokenHash, $recipient, $name);
+    if ($deliveryFailed) webJsonResponse(['ok' => true, 'email_enabled' => false, 'message' => 'Não foi possível enviar o e-mail agora. Tente novamente mais tarde.']);
     webGenericForgotResponse($emailEnabled);
 }
 
@@ -300,6 +777,17 @@ function webHandleResetPassword(): never
  * All non-account actions go through the original API handlers. The bearer is
  * injected only server-side, and the PHP session is already closed.
  */
+function webHandleMailTest(): never
+{
+    webRequireMethod('POST');
+    $context = webAuthenticatedContext(true);
+    if (!(bool)($context['user']['platform_admin'] ?? false)) webError('forbidden', 403);
+    $data = webReadJsonBody();
+    $recipient = is_string($data['recipient'] ?? null) ? strtolower(trim($data['recipient'])) : '';
+    $result = webSmtpTest($recipient, true);
+    webJsonResponse(['ok' => (bool)$result['ok'], 'result' => $result]);
+}
+
 function webDelegateToApi(string $action): never
 {
     $context = webAuthenticatedContext(webRequestMethod() !== 'GET');
@@ -332,6 +820,24 @@ function webDispatch(): never
             webHandleForgotPassword();
         case 'reset_password':
             webHandleResetPassword();
+        case 'platform_dashboard':
+            webHandlePlatformDashboard();
+        case 'platform_plans':
+            webHandlePlatformPlans();
+        case 'platform_customers':
+            webHandlePlatformCustomers();
+        case 'platform_customer_details':
+            webHandlePlatformCustomerDetails();
+        case 'platform_customer_update':
+            webHandlePlatformCustomerUpdate();
+        case 'platform_customer_save':
+            webHandlePlatformCustomerSave();
+        case 'platform_plan_save':
+            webHandlePlatformPlanSave();
+        case 'platform_checkout':
+            webHandlePlatformCheckout();
+        case 'mail_test':
+            webHandleMailTest();
         default:
             webDelegateToApi($action);
     }
